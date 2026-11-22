@@ -20,20 +20,11 @@ import { handleMcpRoute, type McpRouteOptions } from "./routes-mcp.js";
 import {
   handleAsrFlash,
   handleAsrSubmitQueryUnsupported,
-  handleHappyhorseVideoCreate,
-  handleHappyhorseVideoQuery,
-  handleImagesGenerations,
-  handleModel3dCreate,
-  handleModel3dQuery,
   handleTtsCreate,
-  handleVideoTaskCreate,
-  handleVideoTaskDelete,
-  handleVideoTaskQuery,
   type MediaRouteOptions,
 } from "./routes-media.js";
 import { handleQuota } from "./routes-quota.js";
 import { errorResponse } from "../proxy/handler.js";
-import { arkErrorResponse } from "../media/shared.js";
 import type { ResponseStore } from "../responses/store.js";
 import { handleLoginApi, loginPageResponse, type LoginFlowHost } from "./login-handler.js";
 
@@ -164,7 +155,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       return handleResponsesRoute(req, responsesOpts);
     }
     if (path === "/v1/models" && method === "GET") {
-      return handleListModels(req);
+      return handleListModels(req, config);
     }
 
     if (path === "/quota" && method === "GET") {
@@ -213,22 +204,6 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       // Seed-family media faces — Volcano-shaped REST endpoints translated to
       // the ToolHub / official video_edit MCP upstreams (coding-plan only;
       // the handlers enforce the plan gate with an explicit 400).
-      if (path === "/api/v3/images/generations" && method === "POST") {
-        return handleImagesGenerations(req, mediaOpts);
-      }
-      if (path === "/api/v3/contents/generations/tasks" && method === "POST") {
-        return handleVideoTaskCreate(req, mediaOpts);
-      }
-      const taskId = path.startsWith("/api/v3/contents/generations/tasks/")
-        ? decodeTaskIdSegment(path.slice("/api/v3/contents/generations/tasks/".length))
-        : undefined;
-      if (taskId !== undefined && (method === "GET" || method === "DELETE")) {
-        if (!/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
-          return arkErrorResponse(400, "invalid_parameter", "task id must be 1-128 characters of [A-Za-z0-9_-]");
-        }
-        if (method === "GET") return handleVideoTaskQuery(mediaOpts, taskId);
-        return handleVideoTaskDelete(mediaOpts);
-      }
       if (path === "/api/v3/auc/bigmodel/recognize/flash" && method === "POST") {
         return handleAsrFlash(req, mediaOpts);
       }
@@ -239,35 +214,8 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       if (path === "/api/v3/tts/create" && method === "POST") {
         return handleTtsCreate(req, mediaOpts);
       }
-      // ToolHub task faces (2026-11-20): HappyHorse video + the 3D family —
-      // REST over the official plugins' invoke/tasks-query plane. Task ids
-      // are NOT the SeedDance shape: hyper3d ids run 600+ chars and carry
-      // `:`/`~` (kind:uuid~subscription_key), so this face has its own guard.
-      if (path === "/api/v3/happyhorse/videos" && method === "POST") {
-        return handleHappyhorseVideoCreate(req, mediaOpts);
-      }
-      if (path.startsWith("/api/v3/happyhorse/videos/") && method === "GET") {
-        const taskId = decodeTaskIdSegment(path.slice("/api/v3/happyhorse/videos/".length));
-        if (!/^[A-Za-z0-9_~:.-]{1,2048}$/.test(taskId)) {
-          return arkErrorResponse(400, "invalid_parameter", "task id must be 1-2048 characters of [A-Za-z0-9_~:.-]");
-        }
-        return handleHappyhorseVideoQuery(mediaOpts, taskId);
-      }
-      if (path.startsWith("/api/v3/models3d/")) {
-        const rest = path.slice("/api/v3/models3d/".length);
-        const createMatch = /^([a-z0-9-]+)\/tasks$/.exec(rest);
-        const queryMatch = /^([a-z0-9-]+)\/tasks\/(.+)$/.exec(rest);
-        if (createMatch && method === "POST") {
-          return handleModel3dCreate(req, mediaOpts, createMatch[1]);
-        }
-        if (queryMatch && method === "GET") {
-          const taskId = decodeTaskIdSegment(queryMatch[2]);
-          if (!/^[A-Za-z0-9_~:.-]{1,2048}$/.test(taskId)) {
-            return arkErrorResponse(400, "invalid_parameter", "task id must be 1-2048 characters of [A-Za-z0-9_~:.-]");
-          }
-          return handleModel3dQuery(mediaOpts, queryMatch[1], taskId);
-        }
-      }
+      // The generation faces (Seedream / SeedDance / HappyHorse / 3D) moved to
+      // MCP tools on /mcp (2026-11-22) — see src/mcp/local-tools.ts.
     }
 
     if (path === "/health" || path === "/") {
@@ -281,21 +229,6 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
   };
 }
 
-/**
- * Decode the task-id path segment, falling back to the RAW segment on a
- * malformed percent-sequence: decodeURIComponent throws URIError for `%`,
- * `%80`, `%zz` (verified on the pinned Bun 1.4.0), and letting that escape
- * the router would surface as a 500 that bypasses the route's own Ark 400
- * validation. The raw fallback keeps every invalid character, so the
- * `^[A-Za-z0-9_-]{1,128}$` guard below rejects it with the intended 400.
- */
-function decodeTaskIdSegment(raw: string): string {
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-}
 
 /**
  * Start the HTTP server. Resolves once the listener is bound; the returned

@@ -84,6 +84,9 @@ function upstreamStub(opts: StubOptions = {}) {
 function makeServer(fetchImpl: typeof fetch, toolsTtlMs?: number): McpAggregateServer {
   return new McpAggregateServer("https://gw.test", AUTH, {
     fetchImpl,
+    // Upstream-aggregation assertions are catalogue-scoped: the local media
+    // tools have their own integration suite below.
+    localTools: [],
     ...(toolsTtlMs !== undefined ? { toolsTtlMs } : {}),
   });
 }
@@ -226,5 +229,67 @@ describe("McpAggregateServer — JSON-RPC hygiene", () => {
   it("method not found for non-tool MCP methods", async () => {
     const out = await makeServer(upstreamStub().fetch).handle(msg(1, "prompts/list"));
     expect((out as { message: { error: { code: number } } }).message.error.code).toBe(-32601);
+  });
+});
+
+describe("McpAggregateServer — local media tools (proxy-hosted)", () => {
+  it("tools/list appends the 13 local media tools after the upstream ones", async () => {
+    // default constructor (no localTools override) — the production shape
+    const server = new McpAggregateServer("https://gw.test", AUTH, { fetchImpl: upstreamStub().fetch });
+    const out = await toolsList(server);
+    const names = out.tools.map((t) => t.name);
+    for (const expected of [
+      "image-generation__generate_image",
+      "video-generation__generate_video",
+      "video-generation__get_video_result",
+      "happyhorse-video__generate_happyhorse_video",
+      "happyhorse-video__get_happyhorse_video_result",
+      "hyper3d-3d__submit_hyper3d_task",
+      "hyper3d-3d__list_hyper3d_animations",
+      "meshy-3d__submit_meshy_task",
+      "hi3d-3d__get_hi3d_task",
+    ]) {
+      expect(names).toContain(expected);
+    }
+    // descriptions carry the no-workspace deviation note on submit-family tools
+    const gen = out.tools.find((t) => t.name === "happyhorse-video__generate_happyhorse_video") as { description: string } | undefined;
+    expect(gen?.description).toContain("zcode-proxy 差异");
+    // free animation tools keep the verbatim official description (no suffix)
+    const anim = out.tools.find((t) => t.name === "hyper3d-3d__list_hyper3d_animations") as { description: string } | undefined;
+    expect(anim?.description).not.toContain("zcode-proxy 差异");
+    expect(out._meta).toBeUndefined();
+  });
+
+  it("tools/call dispatches a local tool without touching any upstream", async () => {
+    const stub = upstreamStub();
+    const server = makeServer(stub.fetch);
+    const out = await server.handle(
+      msg(1, "tools/call", { name: "happyhorse-video__get_happyhorse_video_result", arguments: {} }),
+    );
+    expect(out.kind).toBe("reply");
+    const result = (out as { message: { result: Record<string, unknown> } }).message.result;
+    // empty task_id → isError result (MCP semantics), not a JSON-RPC error
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0].text).toContain("task_id");
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it("local dispatch hands the media upstream origin + identity headers to the handler", async () => {
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      seen.push({ url: String(input), headers: Object.fromEntries(new Headers(init?.headers).entries()) });
+      return new Response(JSON.stringify({ code: 0, data: { state: "SUCCEEDED", output: { image_url: "https://img.test/x.png" } } }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const server = new McpAggregateServer("https://gw.test", AUTH, {
+      fetchImpl: impl,
+      localToolsOrigin: "https://media.test",
+    });
+    const out = await server.handle(
+      msg(1, "tools/call", { name: "image-generation__generate_image", arguments: { prompt: "a cat" } }),
+    );
+    const result = (out as { message: { result: Record<string, unknown> } }).message.result;
+    expect(result.isError).toBeUndefined();
+    expect(seen[0].url).toBe("https://media.test/api/v1/toolhub/tool/image_generate/invoke");
+    expect(seen[0].headers.authorization).toBe("Bearer jwt-1");
   });
 });

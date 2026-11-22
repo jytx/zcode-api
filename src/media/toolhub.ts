@@ -327,6 +327,27 @@ export interface ToolhubTaskSnapshot {
   usage?: Record<string, unknown>;
 }
 
+/**
+ * One synchronous ToolHub invoke whose success carries data instead of a
+ * task id (the 3D animation libraries: `action:"animation_library"` — free,
+ * sync, `SUCCEEDED` with `output.animations`). One transient retry with the
+ * same Idempotency-Key; free calls cannot double-charge so the ladder is
+ * shorter than the task-submit one.
+ */
+export async function invokeToolLibrary(deps: ToolHubDeps, tool: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const headers = { "Content-Type": "application/json", "Idempotency-Key": randomUUID() };
+  for (let attempt = 1; ; attempt += 1) {
+    const result = await toolhubPost(deps, `/api/v1/toolhub/tool/${tool}/invoke`, {
+      headers,
+      body: JSON.stringify(body),
+      timeoutMs: 30_000,
+    });
+    if (result.ok) return result.data;
+    if (attempt >= 2) throw new MediaUpstreamError(`${tool} library query failed: ${result.message}`, result.code === 3002 ? "rate_limit" : "upstream");
+    await sleep(deps.retryDelayMs ?? 5_000);
+  }
+}
+
 /** Query any ToolHub task tool (3704 not-found etc. throw typed inside toolhubPost). */
 export async function queryToolhubTask(deps: ToolHubDeps, tool: string, taskId: string): Promise<ToolhubTaskSnapshot> {
   const result = await toolhubPost(deps, `/api/v1/toolhub/tool/${tool}/tasks/query`, {

@@ -281,7 +281,10 @@ export async function prepareModel3dBody(
   }
   const body: Record<string, unknown> = { action };
   for (const [key, value] of Object.entries(raw)) {
-    if (key === "action" || key === "request_id") continue;
+    // request_id (idempotency) and output_dir (workspace save — this face has
+    // no filesystem) are LOCAL fields per the plugin core ("除 action 本身和
+    // output_dir / request_id 这些本地字段") — never forwarded upstream.
+    if (key === "action" || key === "request_id" || key === "output_dir") continue;
     if (key === vendor.imagesField) {
       if (!Array.isArray(value)) throw new MediaUpstreamError(`${key} must be an array of image URLs`, "param");
       if (value.length > vendor.maxImages) throw new MediaUpstreamError(`${key} accepts at most ${vendor.maxImages} entries`, "param");

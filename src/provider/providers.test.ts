@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "bun:test";
 import { getProvider } from "./providers.js";
-import { MODELS, ADVERTISED_MODELS } from "./models.js";
+import { MODELS, ADVERTISED_MODEL_IDS } from "./models.js";
 
 describe("providers", () => {
   it("getProvider returns Z.AI definition", () => {
@@ -83,11 +83,13 @@ describe("models", () => {
     expect(v("glm-5.2")).toBeUndefined();
   });
 
-  it("advertises exactly the glm-5.3 pair via ADVERTISED_MODELS", () => {
-    expect(ADVERTISED_MODELS.map((m) => m.id)).toEqual(["glm-5.3", "glm-5.3-flash"]);
-    // Every advertised entry is backed by a full catalog entry (spec parity).
-    for (const m of ADVERTISED_MODELS) {
-      expect(MODELS.find((e) => e.id === m.id)).toBe(m);
+  it("defaults the advertised face to exactly the glm-5.3 pair", () => {
+    // ADVERTISED_MODEL_IDS is the default /v1/models + webui face (loader
+    // DEFAULTS.MODELS mirrors it); every default entry is backed by a full
+    // catalog entry (spec parity).
+    expect(ADVERTISED_MODEL_IDS).toEqual(["glm-5.3", "glm-5.3-flash"]);
+    for (const id of ADVERTISED_MODEL_IDS) {
+      expect(MODELS.find((e) => e.id === id)).toBeDefined();
     }
   });
 });

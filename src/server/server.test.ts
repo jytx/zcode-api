@@ -347,36 +347,135 @@ describe("login page routes", () => {
 });
 
 describe("route handler exports", () => {
-  it("handleListModels rich catalog on client_version=pi", async () => {
-    const resp = handleListModels(new Request("http://localhost/v1/models?client_version=pi"));
+  it("handleListModels rich catalog on client_version=pi — config.models drives the list", async () => {
+    // Advertised face is config.models (full pinned catalog stays internal for
+    // the translator; other model ids still forward). Flash-only config lists
+    // exactly the one model with its catalog metadata.
+    const config = makeConfig({ defaultModel: "glm-5.3-flash", models: ["glm-5.3-flash"] });
+    const resp = handleListModels(new Request("http://localhost/v1/models?client_version=pi"), config);
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
       models: Array<{
         slug: string;
+        display_name: string;
+        description: string;
+        default_reasoning_level?: string;
         context_window: number;
+        max_context_window: number;
         max_tokens?: number;
         input_modalities: string[];
-        supported_reasoning_levels: Array<{ effort: string }>;
+        supported_reasoning_levels: Array<{ effort: string; description: string }>;
+        shell_type: string;
         visibility: string;
+        supported_in_api: boolean;
+        priority: number;
+        support_verbosity: boolean;
+        truncation_policy: { mode: string; limit: number };
+        experimental_supported_tools: string[];
+        apply_patch_tool_type: string;
       }>;
       data?: unknown;
     };
-    // Rich shape: top-level models[], no data[].
+    // Rich shape: top-level models[], no data[] (codex ModelsResponse envelope —
+    // a data[] body is parsed as invalid by codex's models-manager).
     expect(Array.isArray(body.models)).toBe(true);
     expect(body.data).toBeUndefined();
-    // Only the advertised pair is listed (full pinned catalog stays internal
-    // for the translator; other model ids still forward).
-    expect(body.models.map((m) => m.slug)).toEqual(["glm-5.3", "glm-5.3-flash"]);
+    expect(body.models.map((m) => m.slug)).toEqual(["glm-5.3-flash"]);
     const flash = body.models.find((m) => m.slug === "glm-5.3-flash");
     expect(flash).toBeDefined();
     expect(flash!.context_window).toBe(1_000_000);
+    expect(flash!.max_context_window).toBe(1_000_000);
     expect(flash!.max_tokens).toBe(128_000);
     expect(flash!.visibility).toBe("list");
     expect(flash!.input_modalities).toEqual(["text", "image"]);
-    expect(body.models.find((m) => m.slug === "glm-5.3")!.input_modalities).toEqual(["text"]);
     // Reasoning model advertises the Codex-style effort levels the DSH
-    // better-basicfun bridge maps onto its selector levels.
+    // better-basicfun bridge maps onto its selector levels; each preset
+    // carries the description codex's ReasoningEffortPreset requires.
     const efforts = flash!.supported_reasoning_levels.map((l) => l.effort);
     expect(efforts).toEqual(["low", "medium", "high", "xhigh"]);
+    for (const level of flash!.supported_reasoning_levels) {
+      expect(typeof level.description).toBe("string");
+      expect(level.description.length).toBeGreaterThan(0);
+    }
+    // Fields codex's ModelInfo deserialization requires (no serde default) —
+    // missing any of these fails the WHOLE models[] parse → bundled fallback.
+    expect(flash!.default_reasoning_level).toBe("medium");
+    expect(flash!.shell_type).toBe("shell_command");
+    expect(flash!.supported_in_api).toBe(true);
+    expect(flash!.priority).toBe(1);
+    expect(flash!.support_verbosity).toBe(false);
+    expect(flash!.truncation_policy).toEqual({ mode: "tokens", limit: 10_000 });
+    expect(flash!.experimental_supported_tools).toEqual([]);
+    expect(flash!.apply_patch_tool_type).toBe("freeform");
+    expect(flash!.display_name).toBe("GLM 5.3 Flash");
+  });
+
+  it("handleListModels rich shape keys on client_version presence, not its value (codex sends a version number)", async () => {
+    const config = makeConfig({ defaultModel: "glm-5.3-flash", models: ["glm-5.3-flash"] });
+    const resp = handleListModels(new Request("http://localhost/v1/models?client_version=166"), config);
+    const body = (await resp.json()) as { models: Array<{ slug: string }>; data?: unknown };
+    expect(body.models.map((m) => m.slug)).toEqual(["glm-5.3-flash"]);
+    expect(body.data).toBeUndefined();
+  });
+
+  it("handleListModels plain shape follows config.models — deduped; unknown ids degrade to minimal entries", async () => {
+    const config = makeConfig({ models: ["glm-4.6", "glm-4.6", "custom-model-x"] });
+    const resp = handleListModels(new Request("http://localhost/v1/models"), config);
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      object: string;
+      data: Array<{ id: string; object: string; created: number; owned_by: string }>;
+    };
+    expect(body.object).toBe("list");
+    expect(body.data.map((m) => m.id)).toEqual(["glm-4.6", "custom-model-x"]);
+    expect(body.data[0].object).toBe("model");
+    expect(body.data[0].owned_by).toBe("zcode-proxy");
+    // OpenAI Models API spec requires `created` (fixed epoch — deterministic).
+    expect(body.data[0].created).toBe(0);
+
+    // Unknown id (forwarding has no whitelist): advertised without fabricated
+    // specs — no context window, text-only modalities, no effort levels — but
+    // still carrying every codex-required ModelInfo field: the rich-shape
+    // parse is all-or-nothing, so a stub missing shell_type etc. would fail
+    // the whole catalog fetch and drop codex back to its bundled GPT list.
+    const piResp = handleListModels(new Request("http://localhost/v1/models?client_version=pi"), config);
+    const piBody = (await piResp.json()) as {
+      models: Array<{
+        slug: string;
+        display_name: string;
+        context_window?: number;
+        max_tokens?: number;
+        input_modalities: string[];
+        supported_reasoning_levels: Array<{ effort: string; description?: string }>;
+        shell_type: string;
+        visibility: string;
+        supported_in_api: boolean;
+        priority: number;
+        support_verbosity: boolean;
+        truncation_policy: { mode: string; limit: number };
+        experimental_supported_tools: string[];
+        default_reasoning_level?: string;
+      }>;
+    };
+    const unknown = piBody.models.find((m) => m.slug === "custom-model-x");
+    expect(unknown).toBeDefined();
+    expect(unknown!.context_window).toBeUndefined();
+    expect(unknown!.max_tokens).toBeUndefined();
+    expect(unknown!.input_modalities).toEqual(["text"]);
+    expect(unknown!.supported_reasoning_levels).toEqual([]);
+    expect(unknown!.default_reasoning_level).toBeUndefined();
+    expect(unknown!.display_name).toBe("custom-model-x");
+    // Codex-required fields present even on the minimal stub.
+    expect(unknown!.shell_type).toBe("shell_command");
+    expect(unknown!.visibility).toBe("list");
+    expect(unknown!.supported_in_api).toBe(true);
+    expect(unknown!.priority).toBe(2);
+    expect(unknown!.support_verbosity).toBe(false);
+    expect(unknown!.truncation_policy).toEqual({ mode: "tokens", limit: 10_000 });
+    expect(unknown!.experimental_supported_tools).toEqual([]);
+    // Catalog-known entry in the same list keeps its pinned specs.
+    const known = piBody.models.find((m) => m.slug === "glm-4.6");
+    expect(known!.context_window).toBe(200_000);
+    expect(known!.max_tokens).toBe(131_072);
   });
 });

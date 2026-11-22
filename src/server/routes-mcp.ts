@@ -92,6 +92,8 @@ function aggregateFor(opts: McpRouteOptions, auth: OfficialMcpAuth, fingerprint:
   if (cachedAggregate?.fingerprint === fingerprint) return cachedAggregate.server;
   const server = new McpAggregateServer(opts.config.mcp.gateway.upstreamOrigin, auth, {
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+    // Local media tools hit the ToolHub plane — same origin as the media faces.
+    localToolsOrigin: opts.config.media.upstreamOrigin,
   });
   cachedAggregate = { fingerprint, server };
   return server;

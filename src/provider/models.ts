@@ -33,11 +33,11 @@ export const MODELS: ModelDef[] = [
 ];
 
 /**
- * Models advertised via `/v1/models` and the webui picker — a deliberate
- * subset of MODELS. Do not trim MODELS itself to match: the translator still
- * needs the full catalog for maxOutputTokens clamps and reasoning detection
- * on unadvertised (but forwardable) models.
+ * Default advertised pair for `/v1/models` and the webui picker, used when
+ * config.yaml omits `models:` (mirrored by loader DEFAULTS.MODELS). Do not
+ * trim MODELS itself to match: the translator still needs the full catalog
+ * for maxOutputTokens clamps and reasoning detection on unadvertised (but
+ * forwardable) models. The live advertised list is config.models —
+ * handleListModels enriches it with MODELS catalog metadata.
  */
 export const ADVERTISED_MODEL_IDS: readonly string[] = ["glm-5.3", "glm-5.3-flash"];
-
-export const ADVERTISED_MODELS: ModelDef[] = MODELS.filter((m) => ADVERTISED_MODEL_IDS.includes(m.id));

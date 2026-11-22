@@ -1,21 +1,19 @@
 /**
- * Seed-family media routes — the THIN layer (zero business logic per
+ * Media REST routes — the THIN layer (zero business logic per
  * src/server/AGENTS.md): auth gate → body cap → parse → call the src/media
  * service → shape the Ark error surface on failure.
  *
- * All four faces are coding-plan entitlements served through ToolHub and the
- * official video_edit MCP with the same identity headers as /mcp; start-plan
- * / API-key-only connections are rejected here with an explicit 400
- * (`plan_unsupported` / `credentials_unavailable`), mirroring routes-mcp and
- * routes-async — the gateway's own 3101 verdict, surfaced before the
- * round-trip.
+ * 2026-11-22 (user decision "API 路线换回 MCP 路线"): the four generation
+ * families (Seedream / SeedDance / HappyHorse / 3D) moved from these REST
+ * faces to MCP tools on `/mcp` — see src/mcp/local-tools.ts. What remains
+ * here is the speech pair (Seed-ASR flash + Seed-Audio TTS), which is backed
+ * by the official video_edit MCP upstream and has no stdio-plugin equivalent
+ * to mirror.
  *
  * Error shape is the Volcano Ark dialect `{"error":{"code":"<string>",
  * "message"}}` — NOT proxy/handler.ts errorResponse's `{error:{type}}`:
  * these routes are consumed by clients written against the official Volcano
  * docs.
- *
- * Route registration lives in `server.ts` (gated by `config.media.enabled`).
  *
  * @see src/media/shared.ts（门禁/错误分类/体限）
  */
@@ -30,18 +28,8 @@ import {
   readJsonBodyWithCap,
   resolveMediaAuthFrom,
 } from "../media/shared.js";
-import { generateImage, parseSeedImageRequest } from "../media/seed-image.js";
-import { createVideoTask, getVideoTask, parseSeedVideoCreateRequest } from "../media/seed-video.js";
 import { flashTranscribe, parseAsrFlashRequest } from "../media/seed-asr.js";
 import { parseTtsCreateRequest, synthesizeSpeech } from "../media/seed-tts.js";
-import {
-  createHappyhorseVideo,
-  createModel3dTask,
-  getHappyhorseVideo,
-  getModel3dTask,
-  isModel3dVendor,
-  parseHappyhorseSubmit,
-} from "../media/toolhub-tasks.js";
 import type { ToolHubDeps } from "../media/toolhub.js";
 import { VideoEditClient, type VideoEditDeps } from "../media/video-edit.js";
 
@@ -54,21 +42,10 @@ export interface MediaRouteOptions {
 }
 
 /** Request-body caps per face. ASR 45 MiB = the upstream entry-nginx cap
- *  (video_edit speech plane); video 4 MiB = ToolHub request cap; images
- *  14 MiB = one ≤10 MiB base64 reference (4/3 inflation ≈13.3 MiB) plus
- *  envelope — a 12 MiB cap would 413 a spec-legal 10 MiB inline reference
- *  before MAX_REFERENCE_BYTES ever binds. */
+ *  (video_edit speech plane). */
 const BODY_CAPS = {
-  images: 14 * 1024 * 1024,
-  video: 4 * 1024 * 1024,
   asr: 45 * 1024 * 1024,
   tts: 1024 * 1024,
-  /** happyhorse materials are https-only (data: rejected) → plugin MAX_BODY_BYTES. */
-  happyhorse: 4 * 1024 * 1024,
-  /** model3d data: materials: worst legal combo = meshy 4 × 20 MiB images ×
-   *  4/3 base64 inflation ≈ 106.7 MiB + envelope — a tighter cap would 413 a
-   *  spec-legal inline reference (the images-face lesson, AGENTS 承重墙 3). */
-  model3d: 108 * 1024 * 1024,
 } as const;
 
 type AuthedResult = { ok: true; origin: string; headers: Record<string, string> } | { response: Response };
@@ -108,67 +85,6 @@ async function asArkError(err: unknown): Promise<Response> {
 
 function isBodyTooLargeMessage(err: unknown): err is MediaBodyTooLargeError {
   return err instanceof MediaBodyTooLargeError;
-}
-
-/** POST /api/v3/images/generations — Seedream face. */
-export async function handleImagesGenerations(req: Request, opts: MediaRouteOptions): Promise<Response> {
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const body = await readJsonBodyWithCap(req, BODY_CAPS.images);
-    const parsed = parseSeedImageRequest(body);
-    if (!parsed.ok) throw new MediaUpstreamError(parsed.message, parsed.kind);
-    const d = depsFor(opts, authed);
-    const result = await generateImage(d.toolhub, d.fetchImpl, parsed.req);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-/** POST /api/v3/contents/generations/tasks — SeedDance create-task face. */
-export async function handleVideoTaskCreate(req: Request, opts: MediaRouteOptions): Promise<Response> {
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const body = await readJsonBodyWithCap(req, BODY_CAPS.video);
-    const parsed = parseSeedVideoCreateRequest(body);
-    if (!parsed.ok) throw new MediaUpstreamError(parsed.message, parsed.kind);
-    const result = await createVideoTask(depsFor(opts, authed).toolhub, parsed.req);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-/** GET /api/v3/contents/generations/tasks/{id} — SeedDance query face. */
-export async function handleVideoTaskQuery(opts: MediaRouteOptions, taskId: string): Promise<Response> {
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const result = await getVideoTask(depsFor(opts, authed).toolhub, taskId);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-/**
- * DELETE /api/v3/contents/generations/tasks/{id} — the official API supports
- * cancel/delete; ToolHub has no task-cancel surface, so this face is
- * explicitly unsupported (501, not a silent no-op that would let a caller
- * believe a charged task was cancelled). Still passes the plan/credential
- * gate first so a start-plan caller gets the standard 400, consistent with
- * the GET face on the same prefix.
- */
-export async function handleVideoTaskDelete(opts: MediaRouteOptions): Promise<Response> {
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  return arkErrorResponse(
-    501,
-    "not_supported",
-    "task cancel/delete is not supported by this proxy's upstream — tasks run to completion; query the task instead",
-  );
 }
 
 /** POST /api/v3/auc/bigmodel/recognize/flash — Seed-ASR sync face. */
@@ -234,71 +150,6 @@ export async function handleTtsCreate(req: Request, opts: MediaRouteOptions): Pr
       status: 200,
       headers: { "content-type": "application/json", "x-api-request-id": requestId },
     });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-// ── ToolHub task faces: HappyHorse + the 3D family (2026-11-20) ─────────────
-// Same ToolHub plane and identity headers as the faces above; REST bodies
-// mirror the official stdio plugins' tool schemas (see toolhub-tasks.ts).
-
-/** POST /api/v3/happyhorse/videos — HappyHorse submit face. */
-export async function handleHappyhorseVideoCreate(req: Request, opts: MediaRouteOptions): Promise<Response> {
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const body = await readJsonBodyWithCap(req, BODY_CAPS.happyhorse);
-    const parsed = parseHappyhorseSubmit(body);
-    if (!parsed.ok) throw new MediaUpstreamError(parsed.message, "param");
-    const result = await createHappyhorseVideo(depsFor(opts, authed).toolhub, parsed.req);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-/** GET /api/v3/happyhorse/videos/{task_id} — HappyHorse query face. */
-export async function handleHappyhorseVideoQuery(opts: MediaRouteOptions, taskId: string): Promise<Response> {
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const result = await getHappyhorseVideo(depsFor(opts, authed).toolhub, taskId);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-/** POST /api/v3/models3d/{vendor}/tasks — hyper3d | meshy | hi3d submit face. */
-export async function handleModel3dCreate(req: Request, opts: MediaRouteOptions, vendor: string): Promise<Response> {
-  if (!isModel3dVendor(vendor)) {
-    return arkErrorResponse(404, "not_found", `unknown 3D vendor "${vendor}" — supported: hyper3d, meshy, hi3d`);
-  }
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const body = await readJsonBodyWithCap(req, BODY_CAPS.model3d);
-    if (typeof body !== "object" || body === null || Array.isArray(body)) {
-      throw new MediaUpstreamError("request body must be a JSON object", "param");
-    }
-    const result = await createModel3dTask(depsFor(opts, authed).toolhub, vendor, body as Record<string, unknown>);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
-  } catch (err) {
-    return asArkError(err);
-  }
-}
-
-/** GET /api/v3/models3d/{vendor}/tasks/{task_id} — 3D query face. */
-export async function handleModel3dQuery(opts: MediaRouteOptions, vendor: string, taskId: string): Promise<Response> {
-  if (!isModel3dVendor(vendor)) {
-    return arkErrorResponse(404, "not_found", `unknown 3D vendor "${vendor}" — supported: hyper3d, meshy, hi3d`);
-  }
-  const authed = await resolveAuth(opts);
-  if ("response" in authed) return authed.response;
-  try {
-    const result = await getModel3dTask(depsFor(opts, authed).toolhub, vendor, taskId);
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
   } catch (err) {
     return asArkError(err);
   }

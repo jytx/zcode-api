@@ -463,10 +463,30 @@ describe("integration: Models endpoint", () => {
     expect(resp.status).toBe(200);
     const body = await resp.json();
     expect(body.object).toBe("list");
-    // exact advertised set (was pinned in server.test.ts; consolidated to this
-    // real-socket e2e when the unit-side smoke duplicate was removed)
-    expect(body.data.map((m: { id: string }) => m.id)).toEqual(["glm-5.3", "glm-5.3-flash"]);
+    // Advertised face = config.models (2026-11-22 config-driven, was the
+    // hardcoded ADVERTISED pair); this e2e's config.yaml exposes glm-4.6 only,
+    // so the pair must NOT leak through. Real-socket pin of the wiring.
+    expect(body.data.map((m: { id: string }) => m.id)).toEqual(["glm-4.6"]);
     expect(body.data[0].object).toBe("model");
+  });
+
+  it("GET /v1/models?client_version=… returns codex ModelsResponse envelope", async () => {
+    // codex always appends client_version (numeric) to its catalog fetch and
+    // parses ONLY a top-level models[] envelope — data[] fails the whole
+    // fetch and silently falls back to the bundled GPT catalog.
+    const resp = await fetch(proxyUrl("/v1/models?client_version=166"), {
+      headers: { Authorization: "Bearer integration-test-key" },
+    });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.data).toBeUndefined();
+    expect(body.models.map((m: { slug: string }) => m.slug)).toEqual(["glm-4.6"]);
+    // Codex-required ModelInfo fields must be present (all-or-nothing parse).
+    expect(body.models[0].shell_type).toBe("shell_command");
+    expect(body.models[0].visibility).toBe("list");
+    expect(body.models[0].supported_in_api).toBe(true);
+    expect(body.models[0].truncation_policy).toEqual({ mode: "tokens", limit: 10_000 });
+    expect(body.models[0].context_window).toBe(200_000);
   });
 });
 

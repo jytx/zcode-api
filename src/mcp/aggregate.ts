@@ -39,6 +39,7 @@ import {
   type UpstreamTool,
 } from "./upstream.js";
 import { OFFICIAL_MCP_CATALOGUE } from "./catalogue.js";
+import { callLocalTool, findLocalTool, LOCAL_MCP_TOOLS, type LocalToolContext, type LocalToolDef } from "./local-tools.js";
 import type { OfficialMcpAuth } from "./upstream.js";
 
 const KNOWN_PROTOCOL_VERSIONS = new Set(["2024-11-05", "2025-03-26", "2025-06-18"]);
@@ -93,11 +94,21 @@ export type HandleOutcome =
 export class McpAggregateServer {
   private readonly slots: PluginSlot[];
   private readonly toolsTtlMs: number;
+  /** Proxy-hosted media tools (2026-11-22: the four generation families). */
+  private readonly localTools: readonly LocalToolDef[];
 
   constructor(
     private readonly origin: string,
     private readonly auth: OfficialMcpAuth,
-    private readonly options: { fetchImpl?: typeof fetch; serverVersion?: string; toolsTtlMs?: number } = {},
+    private readonly options: {
+      fetchImpl?: typeof fetch;
+      serverVersion?: string;
+      toolsTtlMs?: number;
+      /** Upstream origin for local media tools' ToolHub calls (media.upstreamOrigin). */
+      localToolsOrigin?: string;
+      /** Injectable for tests; defaults to the frozen LOCAL_MCP_TOOLS registry. */
+      localTools?: readonly LocalToolDef[];
+    } = {},
   ) {
     this.slots = OFFICIAL_MCP_CATALOGUE.servers.map((s) => ({
       key: s.key,
@@ -105,6 +116,7 @@ export class McpAggregateServer {
       path: s.path,
     }));
     this.toolsTtlMs = options.toolsTtlMs ?? aggregateToolsTtlMs();
+    this.localTools = options.localTools ?? LOCAL_MCP_TOOLS;
   }
 
   /**
@@ -141,7 +153,7 @@ export class McpAggregateServer {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "zcode-proxy-mcp", version: this.options.serverVersion ?? "1.0.0" },
-      instructions: `All ${OFFICIAL_MCP_CATALOGUE.servers.length} official plugin tools behind one endpoint; tool names are {plugin}__{tool}.`,
+      instructions: `All official plugin tools (upstream-hosted plus proxy-hosted media generation) behind one endpoint; tool names are {plugin}__{tool}.`,
     };
   }
 
@@ -159,6 +171,16 @@ export class McpAggregateServer {
           tools.push({ ...t, name: `${slot.key}${NAMESPACE_SEPARATOR}${t.name}` });
         }
       }
+    }
+    // Local media tools ride last: always available (no upstream probe), the
+    // credential gate happened at the route before the aggregate was built.
+    for (const def of this.localTools) {
+      tools.push({
+        name: `${def.plugin}${NAMESPACE_SEPARATOR}${def.name}`,
+        ...(def.description ? { description: def.description } : {}),
+        ...(def.inputSchema !== undefined ? { inputSchema: def.inputSchema } : {}),
+        ...(def.annotations ? { annotations: def.annotations } : {}),
+      });
     }
     return { tools, unavailable };
   }
@@ -204,6 +226,23 @@ export class McpAggregateServer {
     }
     const key = namespaced.slice(0, sep);
     const original = namespaced.slice(sep + NAMESPACE_SEPARATOR.length);
+    // Local media tools dispatch BEFORE the upstream slot lookup — their
+    // plugin keys (image-generation, happyhorse-video, …) are not catalogue
+    // routeIds, and handler errors are MCP isError results, not RPC errors.
+    const local = findLocalTool(namespaced) ?? (this.localTools !== LOCAL_MCP_TOOLS ? this.localTools.find((d) => `${d.plugin}${NAMESPACE_SEPARATOR}${d.name}` === namespaced) : undefined);
+    if (local) {
+      const ctx: LocalToolContext = {
+        origin: this.options.localToolsOrigin ?? this.origin,
+        headers: this.auth.headers,
+        fetchImpl: this.options.fetchImpl ?? fetch,
+      };
+      const result = await callLocalTool(local, (p?.arguments ?? {}) as Record<string, unknown>, ctx);
+      return rpcResult(id, {
+        ...(result.isError ? { isError: true } : {}),
+        content: result.content,
+        ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
+      });
+    }
     const slot = this.slots.find((s) => s.key === key);
     if (!slot) {
       return rpcError(id, -32602, `Unknown plugin "${key}" in tool name "${namespaced}" — see tools/list`);

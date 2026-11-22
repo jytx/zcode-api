@@ -1,7 +1,9 @@
 /**
- * Media route tests — full fetch-handler dispatch: proxyApiKey gate, plan /
- * credential gates with the Ark error shape, task-id prefix routing, body
- * caps, 501 surfaces, and one happy path per face against a stubbed upstream.
+ * Media route tests (speech faces — ASR flash + TTS; the four generation
+ * families moved to /mcp MCP tools on 2026-11-22, covered by
+ * src/mcp/local-tools.test.ts + aggregate.test.ts): full fetch-handler
+ * dispatch — proxyApiKey gate, plan / credential gates with the Ark error
+ * shape, body caps, 501 surfaces, and one happy path per face.
  */
 import { describe, it, expect } from "bun:test";
 import { createFetchHandler } from "./server.js";
@@ -74,13 +76,13 @@ function handler(config: ProxyConfig, auth: AuthManager, fetchImpl?: typeof fetc
 describe("media routes — gating", () => {
   it("requires the proxy API key when configured (shared gate)", async () => {
     const config = makeConfig({ auth: { proxyApiKey: "sk-proxy" } });
-    const resp = await handler(config, authed())(new Request("http://localhost/api/v3/images/generations", { method: "POST", body: "{}" }));
+    const resp = await handler(config, authed())(new Request("http://localhost/api/v3/tts/create", { method: "POST", body: "{}" }));
     expect(resp.status).toBe(401);
   });
 
   it("400s for start-plan with an Ark-shaped plan_unsupported error", async () => {
     const config = makeConfig({ plan: "start-plan" });
-    const resp = await handler(config, authed())(new Request("http://localhost/api/v3/images/generations", { method: "POST", body: JSON.stringify({ prompt: "x" }) }));
+    const resp = await handler(config, authed())(new Request("http://localhost/api/v3/tts/create", { method: "POST", body: JSON.stringify({ text: "x" }) }));
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("plan_unsupported");
@@ -99,10 +101,8 @@ describe("media routes — gating", () => {
   it("404s every media face when media.enabled=false", async () => {
     const config = makeConfig({ media: { enabled: false, upstreamOrigin: "https://zcode.test" } });
     for (const [path, method] of [
-      ["/api/v3/images/generations", "POST"],
-      ["/api/v3/contents/generations/tasks", "POST"],
-      ["/api/v3/contents/generations/tasks/t1", "GET"],
       ["/api/v3/auc/bigmodel/recognize/flash", "POST"],
+      ["/api/v3/auc/bigmodel/submit", "POST"],
       ["/api/v3/tts/create", "POST"],
     ] as const) {
       const resp = await handler(config, authed())(new Request(`http://localhost${path}`, { method, body: method === "POST" ? "{}" : undefined }));
@@ -123,81 +123,9 @@ describe("media routes — unsupported surfaces", () => {
     }
   });
 
-  it("501s video task DELETE for coding-plan, but start-plan hits the plan gate first (400)", async () => {
-    const h = handler(makeConfig(), authed());
-    const resp = await h(new Request("http://localhost/api/v3/contents/generations/tasks/t1", { method: "DELETE" }));
-    expect(resp.status).toBe(501);
-    const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("not_supported");
-
-    const startPlan = handler(makeConfig({ plan: "start-plan" }), authed());
-    const gated = await startPlan(new Request("http://localhost/api/v3/contents/generations/tasks/t1", { method: "DELETE" }));
-    expect(gated.status).toBe(400);
-    const gatedBody = (await gated.json()) as { error: { code: string } };
-    expect(gatedBody.error.code).toBe("plan_unsupported");
-  });
-});
-
-describe("media routes — task-id routing", () => {
-  it("rejects malformed task ids before any upstream call", async () => {
-    const stub = mediaUpstreamStub({});
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/contents/generations/tasks/bad%2Fid%2F..", { method: "GET" }),
-    );
-    expect(resp.status).toBe(400);
-    expect(stub.calls.length).toBe(0);
-  });
-
-  it("answers 400 (not a router 500) for malformed percent-sequences in the task id", async () => {
-    const stub = mediaUpstreamStub({});
-    // decodeURIComponent throws URIError on these; the router must fall back to
-    // the raw segment so the character-class guard rejects them as 400.
-    for (const suffix of ["%80", "%", "%C3"]) {
-      const resp = await handler(makeConfig(), authed(), stub.fetch)(
-        new Request(`http://localhost/api/v3/contents/generations/tasks/${suffix}`, { method: "GET" }),
-      );
-      expect(resp.status).toBe(400);
-      const body = (await resp.json()) as { error: { code: string; message: string } };
-      expect(body.error.code).toBe("invalid_parameter");
-    }
-    expect(stub.calls.length).toBe(0);
-  });
-
-  it("routes GET tasks/{id} to the ToolHub query and maps the snapshot", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: () => json({ code: 0, data: { status: "succeeded", output: { video_url: "https://v.test/a.mp4" } } }),
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(new Request("http://localhost/api/v3/contents/generations/tasks/task-9", { method: "GET" }));
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as { id: string; status: string; content: { video_url: string } };
-    expect(body).toEqual({ id: "task-9", status: "succeeded", content: { video_url: "https://v.test/a.mp4" } });
-    expect(stub.calls[0].url).toBe("https://zcode.test/api/v1/toolhub/tool/video_generate/tasks/query");
-    const bodyOut = stub.calls[0].body as { task_id: string };
-    expect(bodyOut.task_id).toBe("task-9");
-  });
 });
 
 describe("media routes — happy paths", () => {
-  it("POST /api/v3/images/generations → ToolHub invoke → Ark response", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: (url, body) => {
-        expect(url).toBe("https://zcode.test/api/v1/toolhub/tool/image_generate/invoke");
-        expect((body as { query: string }).query).toBe("a cat");
-        expect((stub.calls[0].headers["idempotency-key"] ?? "")).toMatch(/[0-9a-f-]{36}/);
-        return json({ code: 0, data: { state: "SUCCEEDED", output: { image_url: "https://img.test/x.png" }, invocation_id: "inv-1" } });
-      },
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/images/generations", { method: "POST", body: JSON.stringify({ model: "doubao-seedream-4-0-250828", prompt: "a cat" }) }),
-    );
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as { model: string; created: number; data: Array<{ url: string }>; usage: { generated_images: number } };
-    expect(body.model).toBe("doubao-seedream-4-0-250828");
-    expect(body.created).toBeGreaterThan(0);
-    expect(body.data).toEqual([{ url: "https://img.test/x.png" }]);
-    expect(body.usage).toEqual({ generated_images: 1 });
-  });
-
   it("POST /api/v3/auc/bigmodel/recognize/flash → video_edit → X-Api-Status-Code + ms utterances", async () => {
     const stub = mediaUpstreamStub({
       videoEdit: (body) => {
@@ -288,65 +216,9 @@ describe("media routes — happy paths", () => {
     expect(((await twoRefs.json()) as { error: { message: string } }).error.message).toContain("one voice reference");
   });
 
-  it("POST /api/v3/contents/generations/tasks → invoke → {id, model, status:queued}", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: () => json({ code: 0, data: { state: "SUCCEEDED", output: { task_id: "task-3" } } }),
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/contents/generations/tasks", {
-        method: "POST",
-        body: JSON.stringify({ model: "doubao-seedance-2-5-260628", content: [{ type: "text", text: "drone" }] }),
-      }),
-    );
-    expect(resp.status).toBe(200);
-    expect(await resp.json()).toEqual({ id: "task-3", model: "doubao-seedance-2-5-260628", status: "queued" });
-    // Adaptive default ratio mirrors the Ark default (ToolHub's own default is 16:9).
-    const body = stub.calls[0].body as { ratio?: string };
-    expect(body.ratio).toBe("adaptive");
-  });
 });
 
 describe("media routes — body caps and upstream error surfacing", () => {
-  it("413s an images body over the 14 MiB cap (generic message, not the ASR chunking hint)", async () => {
-    const stub = mediaUpstreamStub({});
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/images/generations", {
-        method: "POST",
-        headers: { "content-length": String(20 * 1024 * 1024) },
-        body: "{}",
-      }),
-    );
-    expect(resp.status).toBe(413);
-    const body = (await resp.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("request_too_large");
-    // The message names the CAP (14 MiB), not the declared size.
-    expect(body.error.message).toContain("14680064");
-    expect(body.error.message).not.toContain("45 MiB");
-    expect(stub.calls.length).toBe(0);
-  });
-
-  it("accepts a request body sized like a spec-legal 10 MiB base64 reference (≈13.3 MiB)", async () => {
-    // 10 MiB image → ≈13.3 MiB base64 + envelope must NOT trip the 14 MiB cap,
-    // and the strict base64 check must pass — the flow reaches upload+invoke.
-    const stub = mediaUpstreamStub({
-      toolhub: (url) =>
-        url.includes("/api/v1/toolhub/files")
-          ? json({ code: 0, data: { url: "https://files.test/ref.png" } })
-          : json({ code: 0, data: { state: "SUCCEEDED", output: { image_url: "https://img.test/x.png" } } }),
-    });
-    // Encodes exactly 10,485,759 bytes (≤ 10 MiB) in 13,981,012 base64 chars (a multiple of 4).
-    const encoded = "A".repeat(13_981_012);
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/images/generations", {
-        method: "POST",
-        body: JSON.stringify({ prompt: "x", image: `data:image/png;base64,${encoded}` }),
-      }),
-    );
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as { data: Array<{ url: string }> };
-    expect(body.data[0]).toEqual({ url: "https://img.test/x.png" });
-  });
-
   it("413s an ASR body over 45 MiB with the chunking hint", async () => {
     const stub = mediaUpstreamStub({});
     const resp = await handler(makeConfig(), authed(), stub.fetch)(
@@ -364,48 +236,6 @@ describe("media routes — body caps and upstream error surfacing", () => {
     expect(stub.calls.length).toBe(0);
   });
 
-  it("video create on HTTP 429 exhausts the same-key ladder → 429 rate_limit_exceeded (definitive rejection)", async () => {
-    const stub = mediaUpstreamStub({ toolhub: () => new Response("slow down", { status: 429 }) });
-    // mediaRetryDelayMs: the video-submit retry ladder sleeps between attempts
-    // (production 5s) — inject ~1ms so the ladder completes inside the test.
-    const fetchHandler = createFetchHandler({ config: makeConfig(), auth: authed(), fetchImpl: stub.fetch, mediaRetryDelayMs: 1 });
-    const resp = await fetchHandler(
-      new Request("http://localhost/api/v3/contents/generations/tasks", { method: "POST", body: JSON.stringify({ content: [{ type: "text", text: "x" }] }) }),
-    );
-    expect(resp.status).toBe(429);
-    const body = (await resp.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("rate_limit_exceeded");
-    expect(body.error.message).toContain("no task was created");
-    expect(body.error.message).not.toContain("charged");
-    expect(stub.calls.length).toBe(4);
-    expect(new Set(stub.calls.map((c) => c.headers["idempotency-key"])).size).toBe(1);
-  });
-
-  it("video create: an unconfirmed transient followed by 429s keeps the double-billing 502", async () => {
-    let n = 0;
-    const stub = mediaUpstreamStub({
-      toolhub: () => {
-        n += 1;
-        if (n === 1) {
-          // A timeout is result-unconfirmed: the submit may have landed, so a
-          // later 429 does NOT clear the double-billing uncertainty.
-          const err = new Error("deadline");
-          err.name = "TimeoutError";
-          throw err;
-        }
-        return new Response("slow down", { status: 429 });
-      },
-    });
-    const fetchHandler = createFetchHandler({ config: makeConfig(), auth: authed(), fetchImpl: stub.fetch, mediaRetryDelayMs: 1 });
-    const resp = await fetchHandler(
-      new Request("http://localhost/api/v3/contents/generations/tasks", { method: "POST", body: JSON.stringify({ content: [{ type: "text", text: "x" }] }) }),
-    );
-    expect(resp.status).toBe(502);
-    const body = (await resp.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("upstream_error");
-    expect(body.error.message).toContain("may already have been created");
-  });
-
   it("maps a speech-gateway 429 to 429 rate_limit_exceeded", async () => {
     const stub = mediaUpstreamStub({ videoEdit: () => new Response("slow down", { status: 429 }) });
     const resp = await handler(makeConfig(), authed(), stub.fetch)(
@@ -417,22 +247,9 @@ describe("media routes — body caps and upstream error surfacing", () => {
     expect(stub.calls.length).toBe(1);
   });
 
-  it("maps ToolHub terminal codes to Ark kinds (3706 → upstream_permission_denied)", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: () => json({ code: 3706, msg: "phone binding required" }),
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/images/generations", { method: "POST", body: JSON.stringify({ prompt: "x" }) }),
-    );
-    expect(resp.status).toBe(502);
-    const body = (await resp.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("upstream_permission_denied");
-    expect(body.error.message).toContain("3706");
-  });
-
   it("invalid JSON bodies answer 400 invalid_parameter (Ark shape)", async () => {
     const resp = await handler(makeConfig(), authed())(
-      new Request("http://localhost/api/v3/images/generations", { method: "POST", body: "not-json" }),
+      new Request("http://localhost/api/v3/tts/create", { method: "POST", body: "not-json" }),
     );
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -440,129 +257,3 @@ describe("media routes — body caps and upstream error surfacing", () => {
   });
 });
 
-describe("media routes — ToolHub task faces (happyhorse + model3d)", () => {
-  it("happyhorse submit reaches happyhorse_video/invoke and answers the task shape", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: (url, body) => {
-        if (url.endsWith("/toolhub/tool/happyhorse_video/invoke")) {
-          expect(body.prompt).toBe("a happy horse");
-          expect(body.duration).toBe(5);
-          return json({ code: 0, data: { state: "SUCCEEDED", output: { task_id: "hh-route-1" } } });
-        }
-        return json({ code: 0, data: {} });
-      },
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/happyhorse/videos", {
-        method: "POST",
-        body: JSON.stringify({ prompt: "a happy horse", duration: 5 }),
-      }),
-    );
-    expect(resp.status).toBe(200);
-    expect(await resp.json()).toEqual({ task_id: "hh-route-1", status: "queued" });
-    expect(stub.calls[0].url).toContain("/api/v1/toolhub/tool/happyhorse_video/invoke");
-    expect(stub.calls[0].headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
-  });
-
-  it("happyhorse query maps succeeded → video_url", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: (url, body) => {
-        if (url.endsWith("/happyhorse_video/tasks/query")) {
-          expect(body).toEqual({ task_id: "hh-route-1" });
-          return json({ code: 0, data: { status: "succeeded", output: { video_url: "https://v.test/a.mp4" } } });
-        }
-        return json({ code: 0, data: {} });
-      },
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/happyhorse/videos/hh-route-1"),
-    );
-    expect(resp.status).toBe(200);
-    expect(await resp.json()).toEqual({ task_id: "hh-route-1", status: "succeeded", video_url: "https://v.test/a.mp4" });
-  });
-
-  it("happyhorse task ids accept the plugin charset (~ and :) up to 2048 chars", async () => {
-    const stub = mediaUpstreamStub({ toolhub: () => json({ code: 0, data: { status: "running" } }) });
-    const longId = "gen:" + "a".repeat(600) + "~sub-key";
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request(`http://localhost/api/v3/happyhorse/videos/${longId}`),
-    );
-    expect(resp.status).toBe(200);
-    expect(stub.calls[0].body.task_id).toBe(longId);
-    const bad = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/happyhorse/videos/has%20space"),
-    );
-    expect(bad.status).toBe(400);
-  });
-
-  it("model3d submit routes per vendor and rejects unknown vendors with 404", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: (url, body) => {
-        if (url.endsWith("/toolhub/tool/meshy_model3d/invoke")) {
-          expect(body).toEqual({ action: "generate", prompt: "a knight" });
-          return json({ code: 0, data: { state: "SUCCEEDED", output: { task_id: "meshy-1" } } });
-        }
-        return json({ code: 0, data: {} });
-      },
-    });
-    const ok = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/models3d/meshy/tasks", {
-        method: "POST",
-        body: JSON.stringify({ action: "generate", prompt: "a knight" }),
-      }),
-    );
-    expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ task_id: "meshy-1", status: "queued" });
-    const unknown = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/models3d/tripo/tasks", { method: "POST", body: "{}" }),
-    );
-    expect(unknown.status).toBe(404);
-    const body = (await unknown.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("not_found");
-  });
-
-  it("model3d query surfaces files[] on success", async () => {
-    const stub = mediaUpstreamStub({
-      toolhub: () =>
-        json({
-          code: 0,
-          data: {
-            status: "succeeded",
-            output: { files: [{ name: "m.glb", url: "https://d.test/m.glb" }] },
-          },
-        }),
-    });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/models3d/hyper3d/tasks/gen~uuid~sub"),
-    );
-    expect(resp.status).toBe(200);
-    expect(await resp.json()).toEqual({
-      task_id: "gen~uuid~sub",
-      status: "succeeded",
-      files: [{ name: "m.glb", url: "https://d.test/m.glb" }],
-    });
-  });
-
-  it("start-plan callers get plan_unsupported on the new faces too", async () => {
-    const config = makeConfig({ plan: "start-plan" });
-    const resp = await handler(config, authed())(
-      new Request("http://localhost/api/v3/happyhorse/videos", { method: "POST", body: JSON.stringify({ prompt: "x" }) }),
-    );
-    expect(resp.status).toBe(400);
-    const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("plan_unsupported");
-  });
-
-  it("model3d body cap 413s oversized inline material before any upstream call", async () => {
-    const stub = mediaUpstreamStub({ toolhub: () => json({ code: 0, data: {} }) });
-    const big = Buffer.alloc(4).toString("base64"); // header content-length dominates
-    const body = JSON.stringify({ action: "generate", images: [`data:image/png;base64,${"A".repeat(110 * 1024 * 1024)}`, big] });
-    const resp = await handler(makeConfig(), authed(), stub.fetch)(
-      new Request("http://localhost/api/v3/models3d/meshy/tasks", { method: "POST", body }),
-    );
-    expect(resp.status).toBe(413);
-    const parsed = (await resp.json()) as { error: { code: string } };
-    expect(parsed.error.code).toBe("request_too_large");
-    expect(stub.calls.length).toBe(0);
-  });
-});

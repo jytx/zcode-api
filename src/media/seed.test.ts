@@ -1,24 +1,20 @@
 /**
- * Seed-family mapping tests: the Ark-shape parsers and the outgoing ToolHub /
- * video_edit payload builders are the compatibility contract — pin every
- * mapping rule, including the accepted-but-ignored deviations and the
- * negative suppressions (body must NOT contain what the caller must not
- * reach upstream with).
+ * Seed-family mapping tests: the outgoing ToolHub / video_edit payload
+ * builders and the reference-material contract are the compatibility surface
+ * (the Ark REST parse layers moved to the MCP media tools on 2026-11-22 —
+ * their successors live in src/mcp/local-tools.test.ts).
  */
 import { describe, it, expect } from "bun:test";
 import { OFFICIAL_MCP_CATALOGUE } from "../mcp/catalogue.js";
-import { parseSeedImageRequest, generateImage } from "./seed-image.js";
+import { resolveReferenceImage } from "./seed-image.js";
 import {
   buildToolhubVideoBody,
-  createVideoTask,
-  mapVideoTaskSnapshot,
-  parseSeedVideoCreateRequest,
   validateVideoMaterialUrls,
 } from "./seed-video.js";
 import { buildTranscribeArguments, mapTranscriptToFlash, parseAsrFlashRequest } from "./seed-asr.js";
 import { buildSynthesizeArguments, mapSynthesizeResponse, parseTtsCreateRequest } from "./seed-tts.js";
-import { MediaUpstreamError, type MediaUpstreamKind } from "./shared.js";
 import type { ToolHubDeps } from "./toolhub.js";
+import { MediaUpstreamError, type MediaUpstreamKind } from "./shared.js";
 
 const okParse = <T>(result: { ok: true; req: T } | { ok: false; kind: MediaUpstreamKind; message: string }): T => {
   if (!result.ok) throw new Error(`expected ok parse, got: ${result.message}`);
@@ -41,33 +37,7 @@ describe("official-catalogue — video_edit manual entry", () => {
   });
 });
 
-describe("parseSeedImageRequest", () => {
-  it("parses prompt + single https reference", () => {
-    const req = okParse(parseSeedImageRequest({ model: "doubao-seedream-4-0-250828", prompt: "a cat", image: "https://r.test/a.png" }));
-    expect(req.prompt).toBe("a cat");
-    expect(req.image).toBe("https://r.test/a.png");
-    expect(req.model).toBe("doubao-seedream-4-0-250828");
-    expect(req.responseFormat).toBe("url");
-  });
-
-  it("accepts a single-element image array, rejects multi-element arrays honestly", () => {
-    expect(okParse(parseSeedImageRequest({ prompt: "x", image: ["https://r.test/a.png"] })).image).toBe("https://r.test/a.png");
-    const err = errParse(parseSeedImageRequest({ prompt: "x", image: ["https://a", "https://b"] }));
-    expect(err.kind).toBe("param");
-    expect(err.message).toContain("single reference image");
-  });
-
-  it("rejects empty prompt and bad response_format", () => {
-    expect(errParse(parseSeedImageRequest({ prompt: "" })).kind).toBe("param");
-    expect(errParse(parseSeedImageRequest({ prompt: "x", response_format: "b64" })).kind).toBe("param");
-  });
-
-  it("accepts b64_json", () => {
-    expect(okParse(parseSeedImageRequest({ prompt: "x", response_format: "b64_json" })).responseFormat).toBe("b64_json");
-  });
-});
-
-describe("generateImage — orchestration", () => {
+describe("resolveReferenceImage — ToolHub reference contract", () => {
   function stubToolhub(handlers: Array<(call: { url: string; body: string | FormData }) => Response>) {
     const calls: Array<{ url: string; body: string | FormData; headers: Record<string, string> }> = [];
     let n = 0;
@@ -86,14 +56,9 @@ describe("generateImage — orchestration", () => {
 
   it("passes https references through WITHOUT an upload round-trip", async () => {
     const { deps, calls } = stubToolhub([invokeOk]);
-    const result = await generateImage(deps, deps.fetchImpl, okParse(parseSeedImageRequest({ prompt: "a cat", image: "https://r.test/a.png" })));
-    expect(result.data[0]).toEqual({ url: "https://img.test/out.png" });
-    expect(result.usage).toEqual({ generated_images: 1 });
-    expect(result.model).toBe("doubao-seedream");
-    expect(calls.length).toBe(1);
-    expect(calls[0].url).toContain("/api/v1/toolhub/tool/image_generate/invoke");
-    const body = JSON.parse(calls[0].body as string) as { query: string; image?: string };
-    expect(body.image).toBe("https://r.test/a.png");
+    const resolved = await resolveReferenceImage(deps, "https://r.test/a.png");
+    expect(resolved).toBe("https://r.test/a.png");
+    expect(calls.length).toBe(0);
   });
 
   it("uploads a data: reference first, then invokes with the presigned url", async () => {
@@ -102,27 +67,15 @@ describe("generateImage — orchestration", () => {
       () => new Response(JSON.stringify({ code: 0, data: { url: "https://files.test/ref.png" } }), { headers: { "content-type": "application/json" } }),
       invokeOk,
     ]);
-    const result = await generateImage(deps, deps.fetchImpl, okParse(parseSeedImageRequest({ prompt: "a cat", image: `data:image/png;base64,${png}` })));
-    expect(result.data[0]).toEqual({ url: "https://img.test/out.png" });
+    const resolved = await resolveReferenceImage(deps, `data:image/png;base64,${png}`);
+    expect(resolved).toBe("https://files.test/ref.png");
     expect(calls[0].url).toContain("/api/v1/toolhub/files");
     expect(calls[0].body instanceof FormData).toBe(true);
-    const invokeBody = JSON.parse(calls[1].body as string) as { image?: string };
-    expect(invokeBody.image).toBe("https://files.test/ref.png");
-  });
-
-  it("returns b64_json by downloading the generated image", async () => {
-    const { deps } = stubToolhub([invokeOk]);
-    const downloader = (async (input: RequestInfo | URL): Promise<Response> => {
-      expect(String(input)).toBe("https://img.test/out.png");
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }) as unknown as typeof fetch;
-    const result = await generateImage(deps, downloader, okParse(parseSeedImageRequest({ prompt: "a cat", response_format: "b64_json" })));
-    expect((result.data[0] as { b64_json: string }).b64_json).toBe(Buffer.from([1, 2, 3]).toString("base64"));
   });
 
   it("rejects non-https non-data references before any upstream call", async () => {
     const { deps, calls } = stubToolhub([invokeOk]);
-    await expect(generateImage(deps, deps.fetchImpl, okParse(parseSeedImageRequest({ prompt: "x", image: "http://r.test/a.png" })))).rejects.toThrow(/https/);
+    await expect(resolveReferenceImage(deps, "http://r.test/a.png")).rejects.toThrow(/https/);
     expect(calls.length).toBe(0);
   });
 
@@ -135,133 +88,31 @@ describe("generateImage — orchestration", () => {
       "data:image/png;base64,QU%2BD", // percent-encoded
     ];
     for (const image of bad) {
-      await expect(generateImage(deps, deps.fetchImpl, okParse(parseSeedImageRequest({ prompt: "x", image })))).rejects.toThrow(/standard base64/);
+      await expect(resolveReferenceImage(deps, image)).rejects.toThrow(/standard base64/);
     }
     expect(calls.length).toBe(0);
   });
 });
 
-describe("parseSeedVideoCreateRequest", () => {
-  it("routes content roles onto ToolHub params (reference materials)", () => {
-    const req = okParse(parseSeedVideoCreateRequest({
-      model: "doubao-seedance-2-5-260628",
-      content: [
-        { type: "text", text: "drone over a forest" },
-        { type: "image_url", image_url: { url: "https://r.test/ref.png" } },
-        { type: "video_url", video_url: { url: "asset://v1" } },
-        { type: "audio_url", audio_url: { url: "https://r.test/a.mp3" } },
-      ],
-      duration: 5,
-      ratio: "16:9",
-    }));
-    expect(req.prompt).toBe("drone over a forest");
-    expect(req.images).toEqual(["https://r.test/ref.png"]);
-    expect(req.videos).toEqual(["asset://v1"]);
-    expect(req.audios).toEqual(["https://r.test/a.mp3"]);
-    expect(req.duration).toBe(5);
-    expect(req.ratio).toBe("16:9");
-    expect(req.firstFrame).toBeUndefined();
-    expect(req.lastFrame).toBeUndefined();
-  });
-
-  it("routes explicit first/last_frame roles (no reference materials — ToolHub exclusivity)", () => {
-    const req = okParse(parseSeedVideoCreateRequest({
-      content: [
-        { type: "text", text: "morph" },
-        { type: "image_url", image_url: { url: "https://r.test/first.png" }, role: "first_frame" },
-        { type: "image_url", image_url: { url: "https://r.test/last.png" }, role: "last_frame" },
-      ],
-      ratio: "adaptive",
-    }));
-    expect(req.firstFrame).toBe("https://r.test/first.png");
-    expect(req.lastFrame).toBe("https://r.test/last.png");
-    expect(req.images).toBeUndefined();
-    expect(req.ratio).toBe("adaptive");
-  });
-
-  it("joins multiple text items with newline", () => {
-    const req = okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }));
-    expect(req.prompt).toBe("a\nb");
-  });
-
-  it("defaults an omitted ratio to adaptive EXCEPT with a first_frame", () => {
-    const plain = okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }] }));
-    expect(plain.ratio).toBe("adaptive");
-    const framed = okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }, { type: "image_url", image_url: { url: "https://r.test/f.png" }, role: "first_frame" }] }));
-    expect(framed.ratio).toBeUndefined();
-  });
-
-  it("enforces the first/last-frame exclusivity and last-without-first rules", () => {
-    const mixed = errParse(parseSeedVideoCreateRequest({
-      content: [
-        { type: "text", text: "x" },
-        { type: "image_url", image_url: { url: "https://r.test/f.png" }, role: "first_frame" },
-        { type: "image_url", image_url: { url: "https://r.test/r.png" } },
-      ],
-    }));
-    expect(mixed.kind).toBe("param");
-    expect(errParse(parseSeedVideoCreateRequest({
-      content: [{ type: "text", text: "x" }, { type: "image_url", image_url: { url: "https://r.test/l.png" }, role: "last_frame" }],
-    })).message).toContain("last_frame requires a first_frame");
-  });
-
-  it("validates duration and ratio ranges", () => {
-    expect(errParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }], duration: 3 })).kind).toBe("param");
-    expect(errParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }], duration: 31 })).kind).toBe("param");
-    expect(okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }], duration: -1 })).duration).toBe(-1);
-    expect(errParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }], ratio: "21:10" })).kind).toBe("param");
-  });
-
-  it("rejects empty content and unknown types", () => {
-    expect(errParse(parseSeedVideoCreateRequest({ content: [] })).kind).toBe("param");
-    expect(errParse(parseSeedVideoCreateRequest({})).kind).toBe("param");
-    expect(errParse(parseSeedVideoCreateRequest({ content: [{ type: "ppt" }] })).kind).toBe("param");
-  });
-});
-
-describe("seed-video — outgoing body + validation + mapping", () => {
-  it("buildToolhubVideoBody mirrors buildSubmitBody field-for-field", () => {
-    const req = okParse(parseSeedVideoCreateRequest({
-      content: [
-        { type: "text", text: "x" },
-        { type: "image_url", image_url: { url: "https://r.test/a.png" } },
-        { type: "video_url", video_url: { url: "asset://v" } },
-      ],
-      duration: 8,
-    }));
-    const body = buildToolhubVideoBody(req);
-    expect(body).toEqual({ query: "x", duration: 8, ratio: "adaptive", images: ["https://r.test/a.png"], videos: ["asset://v"] });
+describe("seed-video — outgoing body + validation", () => {
+  it("buildToolhubVideoBody mirrors buildSubmitBody field-for-field (first/last frames exclusive)", () => {
+    const body = buildToolhubVideoBody({ prompt: "x", images: ["https://r.test/a.png"], videos: ["asset://v"], duration: 8 });
+    expect(body).toEqual({ query: "x", duration: 8, images: ["https://r.test/a.png"], videos: ["asset://v"] });
+    const frames = buildToolhubVideoBody({ prompt: "x", firstFrame: "https://r.test/f.png", lastFrame: "https://r.test/l.png" });
+    expect(frames).toEqual({ query: "x", first_frame: "https://r.test/f.png", last_frame: "https://r.test/l.png" });
   });
 
   it("validateVideoMaterialUrls rejects data:/http: videos and oversized inline audio", () => {
-    const badVideo = okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }, { type: "video_url", video_url: { url: "data:video/mp4;base64,AAA" } }] }));
-    expect(validateVideoMaterialUrls(badVideo)).toEqual({ ok: false, message: expect.stringContaining("https:// or asset://") });
-    const bigAudio = okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }, { type: "audio_url", audio_url: { url: `data:audio/wav;base64,${"A".repeat(3 * 1024 * 1024)}` } }] }));
-    expect(validateVideoMaterialUrls(bigAudio).ok).toBe(false);
-    const good = okParse(parseSeedVideoCreateRequest({ content: [{ type: "text", text: "x" }, { type: "audio_url", audio_url: { url: `data:audio/wav;base64,${"A".repeat(64)}` } }] }));
-    expect(validateVideoMaterialUrls(good).ok).toBe(true);
+    expect(validateVideoMaterialUrls({ prompt: "x", videos: ["data:video/mp4;base64,AAA"] })).toEqual({
+      ok: false,
+      message: expect.stringContaining("https:// or asset://"),
+    });
+    const bigAudio = validateVideoMaterialUrls({ prompt: "x", audios: [`data:audio/wav;base64,${"A".repeat(3 * 1024 * 1024)}`] });
+    expect(bigAudio.ok).toBe(false);
+    const good = validateVideoMaterialUrls({ prompt: "x", audios: [`data:audio/wav;base64,${"A".repeat(64)}`] });
+    expect(good.ok).toBe(true);
   });
 
-  it("mapVideoTaskSnapshot: succeeded/failed/unknown→running", () => {
-    expect(mapVideoTaskSnapshot("t", { status: "succeeded", videoUrl: "https://v.test/a.mp4" })).toEqual({ id: "t", status: "succeeded", content: { video_url: "https://v.test/a.mp4" } });
-    const failed = mapVideoTaskSnapshot("t", { status: "failed", failure: { code: "X", message: "no" } });
-    expect(failed.status).toBe("failed");
-    expect(failed.error).toEqual({ code: "X", message: "no" });
-    expect(mapVideoTaskSnapshot("t", { status: "processing" }).status).toBe("running");
-    expect(mapVideoTaskSnapshot("t", { status: "unknown" }).status).toBe("running");
-  });
-
-  it("createVideoTask submits and echoes the model", async () => {
-    const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      expect(String(input)).toContain("/api/v1/toolhub/tool/video_generate/invoke");
-      const body = JSON.parse(String(init?.body)) as { query: string };
-      expect(body.query).toBe("x");
-      return new Response(JSON.stringify({ code: 0, data: { state: "SUCCEEDED", output: { task_id: "task-7" } } }), { headers: { "content-type": "application/json" } });
-    }) as unknown as typeof fetch;
-    const deps: ToolHubDeps = { origin: "https://zcode.test", headers: {}, fetchImpl: impl, retryDelayMs: 1 };
-    const req = okParse(parseSeedVideoCreateRequest({ model: "doubao-seedance-2-0-260128", content: [{ type: "text", text: "x" }] }));
-    expect(await createVideoTask(deps, req)).toEqual({ id: "task-7", model: "doubao-seedance-2-0-260128", status: "queued" });
-  });
 });
 
 describe("seed-asr — flash mapping", () => {

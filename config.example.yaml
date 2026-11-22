@@ -40,8 +40,11 @@ providers:
 # Default model used when a client request omits `model`.
 defaultModel: glm-5.3
 
-# Informational model list surfaced in the TUI / startup output; any other
-# model id still forwards upstream (no whitelist enforcement).
+# Advertised model list: drives GET /v1/models (and the /webui picker), plus
+# the TUI / startup display. defaultModel is always included automatically.
+# Any model id still forwards upstream (no whitelist enforcement); ids outside
+# the pinned catalog are advertised without specs (no context window/reasoning
+# levels) until added to MODELS in src/provider/models.ts.
 models:
   - glm-5.3
   - glm-5.3-flash
