@@ -33,6 +33,7 @@ import {
   type McpCredentialReason,
 } from "../mcp/upstream.js";
 import { McpAggregateServer, type JsonRpcMessage, type JsonRpcReply } from "../mcp/aggregate.js";
+import { LOCAL_MCP_TOOLS } from "../mcp/local-tools.js";
 import { OFFICIAL_MCP_CATALOGUE } from "../mcp/catalogue.js";
 import { errorResponse } from "../proxy/handler.js";
 import type { Credential } from "../auth/types.js";
@@ -107,14 +108,30 @@ export async function handleMcpRoute(req: Request, opts: McpRouteOptions): Promi
 }
 
 /** POST /mcp — one JSON-RPC message or a batch. */
+/** POST body cap. The local media tools accept data: materials whose base64
+ *  inflates 4/3 — the worst legal combo (meshy 4 × 20 MiB decoded images
+ *  ≈106.7 MiB after base64) sets the floor; this mirrors the removed REST
+ *  faces' model3d cap. The precheck runs BEFORE the body is buffered
+ *  (review 2026-11-22 #3: /mcp was the only unbounded-body surface once the
+ *  capped REST faces moved here). */
+const MCP_BODY_CAP_BYTES = 108 * 1024 * 1024;
+
 async function handleMcpRpc(req: Request, opts: McpRouteOptions): Promise<Response> {
+  const declared = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MCP_BODY_CAP_BYTES) {
+    return jsonRpcHttpResponse({ jsonrpc: "2.0", id: null, error: { code: -32700, message: `Parse error: request body exceeds the ${Math.floor(MCP_BODY_CAP_BYTES / (1024 * 1024))} MiB cap` } }, 413);
+  }
   const status = await resolveAuthForRpc(opts);
   if ("response" in status) return status.response;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(await req.text());
-  } catch {
+  } catch (err) {
+    if ((err as Error)?.name === "RangeError") {
+      // Body read blew past memory before/without a content-length — same verdict.
+      return jsonRpcHttpResponse({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: request body exceeds the 108 MiB cap" } }, 413);
+    }
     return jsonRpcHttpResponse({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: body is not valid JSON" } }, 400);
   }
 
@@ -209,6 +226,8 @@ interface ListingBody {
   authMode: string | null;
   authError: string | null;
   servers: ListedServer[];
+  /** Proxy-hosted media tools (not catalogue servers) — shown for discovery. */
+  localTools: Array<{ name: string; description: string }>;
 }
 
 /**
@@ -250,6 +269,7 @@ async function handleMcpListing(req: Request, opts: McpRouteOptions): Promise<Re
     authMode: status.ok ? status.auth.mode : null,
     authError: status.ok ? null : status.reason,
     servers,
+    localTools: LOCAL_MCP_TOOLS.map((t) => ({ name: `${t.plugin}__${t.name}`, description: t.description })),
   };
 
   if (accept.includes("text/html")) {

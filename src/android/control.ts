@@ -331,10 +331,10 @@ async function dispatch(
 
     case "setConfig": {
       if (!ctx.onSetConfig) return { ok: false, error: "config_update_unavailable" };
-      // Protocol-level gate: the config surface stays zai|bigmodel — zai_cn is
-      // a login flavor, never a config provider (official folding). The JSON
-      // transport bypasses the type system, so validate before the hook.
-      if (cmd.provider && cmd.provider !== "zai" && cmd.provider !== "bigmodel") {
+      // Protocol-level gate: the config surface is zai|zai_cn (2026-11-22 the
+      // bigmodel label is retired). The JSON transport bypasses the type
+      // system, so validate before the hook.
+      if (cmd.provider && cmd.provider !== "zai" && cmd.provider !== "zai_cn") {
         return { ok: false, error: "invalid_provider" };
       }
       const result = await ctx.onSetConfig({ provider: cmd.provider, plan: cmd.plan });

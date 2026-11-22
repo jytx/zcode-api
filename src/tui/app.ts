@@ -68,7 +68,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
   const serverRef: { current: ProxyServer | null } = { current: null };
 
   const state = {
-    // Config-surface provider (zai|bigmodel) — the login-page flow picks the
+    // Config-surface provider (zai|zai_cn) — the login-page flow picks the
     // login flavor independently; `p` keeps cycling the config surface only.
     provider: config.provider,
     plan: config.plan as PlanTier,
@@ -390,7 +390,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
 
   // --- provider / plan switching (mirrors the Android setConfig command) ---
   function switchProvider(): void {
-    const next: ProviderId = state.provider === "zai" ? "bigmodel" : "zai";
+    const next: ProviderId = state.provider === "zai" ? "zai_cn" : "zai";
     applyConfigChange(next, state.plan, `provider → ${next}`);
   }
 
@@ -451,7 +451,8 @@ export async function runTui(args: ServeArgs): Promise<void> {
     handle.closeTimer = timer;
   }
 
-  // credentialFamily (zai_cn → bigmodel fold) comes from provider/providers.js.
+  // credentialFamily (zai_cn family label; legacy bigmodel credentials fold
+  // into it) comes from provider/providers.js.
 
   async function startLogin(): Promise<void> {
     // Stop-first guard (logout/switching discipline): a login completing
@@ -522,7 +523,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
     await saveCredential(cred);
     if (serverRef.current) auth.setOAuthCredential(cred);
     // Family sync: a credential whose family differs from the config surface
-    // (e.g. zai_cn while provider=bigmodel) would silently serve traffic
+    // (e.g. a zai-family credential while provider=zai_cn) would silently serve traffic
     // through the wrong upstream endpoints. The stop-first guard means the
     // proxy is stopped during login, so the yaml write is safe.
     const family = credentialFamily(provider);

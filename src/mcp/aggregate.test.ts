@@ -262,7 +262,9 @@ describe("McpAggregateServer — local media tools (proxy-hosted)", () => {
 
   it("tools/call dispatches a local tool without touching any upstream", async () => {
     const stub = upstreamStub();
-    const server = makeServer(stub.fetch);
+    // default registry (makeServer injects localTools: [] for the upstream
+    // suites — dispatch goes through this instance's registry per fix #5)
+    const server = new McpAggregateServer("https://gw.test", AUTH, { fetchImpl: stub.fetch, localToolsOrigin: "https://media.test" });
     const out = await server.handle(
       msg(1, "tools/call", { name: "happyhorse-video__get_happyhorse_video_result", arguments: {} }),
     );

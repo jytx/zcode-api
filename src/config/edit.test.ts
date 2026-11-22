@@ -25,9 +25,9 @@ describe("updateConfigYaml", () => {
     );
 
     try {
-      updateConfigYaml(path, { provider: "bigmodel", plan: "start-plan" });
+      updateConfigYaml(path, { provider: "zai_cn", plan: "start-plan" });
       const updated = readFileSync(path, "utf-8");
-      expect(updated).toContain("provider: bigmodel");
+      expect(updated).toContain("provider: zai_cn");
       expect(updated).toContain("plan: start-plan");
       expect(updated).toContain("port: 8080");
       expect(updated).toContain("- glm-5.3");

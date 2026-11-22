@@ -28,8 +28,7 @@ import { randomUUID } from "node:crypto";
 import type { UpstreamHeaderPair } from "../proxy/upstream.js";
 import type { Credential } from "../auth/types.js";
 import { credentialString } from "../auth/types.js";
-import { credentialFamily } from "../provider/providers.js";
-import { warmHighspeedProviderConfig } from "./provider-config.js";
+import { warmHighspeedProviderConfig, type HighspeedFamily } from "./provider-config.js";
 
 const DRAW_PATH = "/api/v1/highspeed/draw";
 /** Measured admitted-draw tail reaches ~5.6s (2026-10-14 probe); official transport timeout is 20s. */
@@ -573,14 +572,25 @@ export async function isHighspeedCardRejection(resp: Response): Promise<boolean>
   return false;
 }
 
+/** Credential provider → HighspeedFamily. WIRE-namespace boundary: the
+ *  official entitlement keys are account:zai-highspeed-card /
+ *  account:bigmodel-highspeed-card — the zai_cn CONFIG family maps to the
+ *  bigmodel WIRE label (2026-11-22 the bigmodel label is retired from the
+ *  config/UI surface only). Legacy bigmodel credentials share it. */
+function highspeedFamily(provider: Credential["provider"]): HighspeedFamily {
+  return provider === "zai" ? "zai" : "bigmodel";
+}
+
 /** Credential → HighspeedAuth (returns null when the JWT needed for draw is missing). */
 export function highspeedAuthFrom(cred: Credential): HighspeedAuth | null {
   if (!cred.jwt?.trim()) return null;
   return {
     jwt: cred.jwt,
     codingPlanAuth: credentialString(cred),
-    // zai_cn folds into the BIGMODEL family (desktop
-    // resolveStartPlanFamilyFromOAuthProvider: zai_cn → "bigmodel").
-    family: credentialFamily(cred.provider),
+    // WIRE-namespace boundary: the official entitlement keys are
+    // account:zai-highspeed-card / account:bigmodel-highspeed-card — the
+    // zai_cn CONFIG family maps to the bigmodel WIRE label here (2026-11-22
+    // the bigmodel label is retired from the config/UI surface only).
+    family: highspeedFamily(cred.provider),
   };
 }

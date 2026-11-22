@@ -326,10 +326,9 @@ async function startServePanel(
     plan?: "coding-plan" | "start-plan";
   }): Promise<{ ok: true; provider: ProviderId; plan: "coding-plan" | "start-plan" } | { ok: false; error: string }> {
     if (serverRef.current) return { ok: false, error: "stop_proxy_first" };
-    // Config surface stays zai|bigmodel — zai_cn is a login flavor, never a
-    // config provider (official folding). Runtime check: the control JSON
-    // path bypasses the type system.
-    if (changes.provider && changes.provider !== "zai" && changes.provider !== "bigmodel") {
+    // Config surface is zai|zai_cn (2026-11-22 the bigmodel label is retired).
+    // Runtime check: the control JSON path bypasses the type system.
+    if (changes.provider && changes.provider !== "zai" && changes.provider !== "zai_cn") {
       return { ok: false, error: "invalid_provider" };
     }
     if (changes.provider) config.provider = changes.provider;
@@ -420,10 +419,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   const auth = new AuthManager();
   const cred = await loadCredential();
   if (!cred) {
-    // The login flavor for the configured family: bigmodel-family configs log
-    // in via zai_cn (linked BigModel) — the bigmodel OAuth flavor is gone.
-    const flavor = config.provider === "bigmodel" ? "zai_cn" : config.provider;
-    console.error(`Not logged in. Run: zcode-proxy auth login ${flavor}`);
+    console.error(`Not logged in. Run: zcode-proxy auth login ${config.provider}`);
     process.exit(1);
   }
   auth.setOAuthCredential(cred);
@@ -452,7 +448,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
       // panel poll's syncAuthWithDisk is a no-op instead of re-setting the
       // identical credential and logging a phantom switch.
       authFingerprint.current = JSON.stringify(cred);
-      // Family sync (zai_cn→zai folding): keep config.yaml's provider on the
+      // Family sync: keep config.yaml's provider on the credential's family
       // credential's family so upstream endpoint selection stays coherent.
       const family = credentialFamily(flavor);
       if (config.provider !== family) {
@@ -689,10 +685,9 @@ async function runAndroid(): Promise<void> {
     plan?: "coding-plan" | "start-plan";
   }): Promise<{ ok: true; provider: ProviderId; plan: "coding-plan" | "start-plan" } | { ok: false; error: string }> {
     if (serverRef.current) return { ok: false, error: "stop_proxy_first" };
-    // Config surface stays zai|bigmodel — zai_cn is a login flavor, never a
-    // config provider (official folding). Runtime check: the control JSON
-    // path bypasses the type system.
-    if (changes.provider && changes.provider !== "zai" && changes.provider !== "bigmodel") {
+    // Config surface is zai|zai_cn (2026-11-22 the bigmodel label is retired).
+    // Runtime check: the control JSON path bypasses the type system.
+    if (changes.provider && changes.provider !== "zai" && changes.provider !== "zai_cn") {
       return { ok: false, error: "invalid_provider" };
     }
     if (changes.provider) config.provider = changes.provider;
@@ -899,8 +894,8 @@ async function authLogin(args: string[]): Promise<void> {
   await saveCredential(cred);
 
   // Family sync — same discipline as the TUI finalizeLogin / serve onTokens
-  // paths: serving a zai-family credential through bigmodel endpoints (or vice
-  // versa, e.g. a zai_cn login while config says bigmodel) 401s every request
+  // paths: serving a zai-family credential through the open.bigmodel.cn chain
+  // (or vice versa, e.g. a zai_cn credential while provider=zai) 401s every request
   // with nothing pointing at the mismatch.
   try {
     const config = loadConfig(configPath);

@@ -18,7 +18,7 @@ type Seg = { t: string; c?: string };
 /** What a mouse click on a button should do. `key` reuses the key bindings. */
 export type ClickAction =
   | { kind: "key"; key: string }
-  | { kind: "provider"; value: "zai" | "bigmodel" }
+  | { kind: "provider"; value: "zai" | "zai_cn" }
   | { kind: "plan"; value: "coding-plan" | "start-plan" }
   | { kind: "follow" };
 
@@ -397,9 +397,9 @@ export function buildFrame(s: FrameState): Frame {
   const providerRow = composeRow(
     w, lines.length, "Provider",
     optionParts(
-      ["zai", "bigmodel"],
+      ["zai", "zai_cn"],
       s.provider,
-      (v) => ({ kind: "provider", value: v as "zai" | "bigmodel" }),
+      (v) => ({ kind: "provider", value: v as "zai" | "zai_cn" }),
       busy,
     ),
   );

@@ -40,7 +40,7 @@ interface TransformContext {
    * prefix (bundle `p2`: zai→"zai-api", bigmodel→"bigmodel-api"). Always set
    * by production callers alongside `startPlan`.
    */
-  provider?: "zai" | "bigmodel";
+  provider?: "zai" | "zai_cn";
 }
 
 /**

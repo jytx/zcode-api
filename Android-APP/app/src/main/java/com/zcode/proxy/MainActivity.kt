@@ -142,7 +142,7 @@ private fun AppScreen(themeMode: ThemeMode, onThemeModeChange: (ThemeMode) -> Un
 
     var reachable by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(false) }
-    var provider by remember { mutableStateOf("bigmodel") }
+    var provider by remember { mutableStateOf("zai") }
     var plan by remember { mutableStateOf("coding-plan") }
     var proxyPort by remember { mutableStateOf(0) }
     var proxyRunning by remember { mutableStateOf(false) }
@@ -718,7 +718,7 @@ private fun AccountCard(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                if (provider == "zai") "Z.AI 账号" else "智谱账号",
+                if (provider == "zai") "Z.AI 账号" else "Z.AI 中国版账号",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = cs.onSurface,
@@ -808,7 +808,7 @@ private fun AccessConfigCard(
             Text("服务商", fontSize = 13.sp, color = cs.onSurfaceVariant, modifier = Modifier.width(52.dp))
             SegChip("Z.AI", provider == "zai", enabled, modifier = Modifier.weight(1f), fill = true) { onProviderChange("zai") }
             Spacer(Modifier.width(8.dp))
-            SegChip("智谱", provider == "bigmodel", enabled, modifier = Modifier.weight(1f), fill = true) { onProviderChange("bigmodel") }
+            SegChip("中国版", provider == "zai_cn", enabled, modifier = Modifier.weight(1f), fill = true) { onProviderChange("zai_cn") }
         }
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1007,7 +1007,7 @@ private fun SettingsScreen(
         }
         Spacer(Modifier.height(12.dp))
         CardBlock(title = "接入信息") {
-            SettingRow("服务商", if (provider == "zai") "Z.AI" else "智谱")
+            SettingRow("服务商", if (provider == "zai") "Z.AI" else "Z.AI 中国版")
             SettingRow("套餐", plan)
             SettingRow(
                 "状态",

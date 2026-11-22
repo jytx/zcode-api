@@ -20,7 +20,7 @@ const CONFIG: ProxyConfig = {
   plan: "coding-plan",
   providers: {
     zai: { anthropicBase: "https://api.z.ai/api/anthropic", openaiBase: "https://api.z.ai/api/coding/paas/v4" },
-    bigmodel: { anthropicBase: "https://open.bigmodel.cn/api/anthropic", openaiBase: "https://open.bigmodel.cn/api/coding/paas/v4" },
+    zai_cn: { anthropicBase: "https://open.bigmodel.cn/api/anthropic", openaiBase: "https://open.bigmodel.cn/api/coding/paas/v4" },
   },
   defaultModel: "glm-5.2",
   models: ["glm-5.2"],
@@ -245,7 +245,7 @@ describe("handleResponses", () => {
 // HTTP 400 {"code":3007,"msg":"captcha verify failed"} while the OpenAI and
 // Anthropic routes worked.
 describe("handleResponses captcha (start-plan)", () => {
-  const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "bigmodel" };
+  const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "zai_cn" };
   const PARAM_HEADER = "x-aliyun-captcha-verify-param";
   const REGION_HEADER = "x-aliyun-captcha-verify-region";
 
@@ -357,7 +357,7 @@ describe("handleResponses captcha (start-plan)", () => {
   });
 
   it("injects the device/session metadata.user_id blob on BOTH plans (bundle E2e is plan-agnostic)", async () => {
-    const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "bigmodel" };
+    const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "zai_cn" };
     let codingBody = "";
     let startBody = "";
     const codingFetch = (async (request: Request): Promise<Response> => {
@@ -436,7 +436,7 @@ describe("handleResponses resilience (CL-08)", () => {
   });
 
   it("captcha retry dispatch failure → 502 upstream_unreachable (not mislabeled 503)", async () => {
-    const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "bigmodel" };
+    const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "zai_cn" };
     let calls = 0;
     const fetchImpl = (async (): Promise<Response> => {
       calls += 1;
@@ -467,7 +467,7 @@ describe("handleResponses resilience (CL-08)", () => {
   });
 
   it("captcha solver failure → 503 captcha_solver_failed (after bounded acquire retries)", async () => {
-    const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "bigmodel" };
+    const START_PLAN: ProxyConfig = { ...CONFIG, plan: "start-plan", provider: "zai_cn" };
     const fetchImpl = (async (): Promise<Response> =>
       new Response(JSON.stringify({ code: 3007, msg: "captcha verify failed" }), {
         status: 400, headers: { "content-type": "application/json" },

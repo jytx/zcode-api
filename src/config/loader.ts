@@ -47,8 +47,8 @@ const DEFAULTS = {
   LOG_LEVEL: "info" as const,
   ZAI_ANTHROPIC_BASE: "https://api.z.ai/api/anthropic",
   ZAI_OPENAI_BASE: "https://api.z.ai/api/coding/paas/v4",
-  BIGMODEL_ANTHROPIC_BASE: "https://open.bigmodel.cn/api/anthropic",
-  BIGMODEL_OPENAI_BASE: "https://open.bigmodel.cn/api/coding/paas/v4",
+  ZAI_CN_ANTHROPIC_BASE: "https://open.bigmodel.cn/api/anthropic",
+  ZAI_CN_OPENAI_BASE: "https://open.bigmodel.cn/api/coding/paas/v4",
   SOURCE_TITLE: "cli",
   REFERER_ORIGIN: "https://zcode.z.ai",
   CLIENT_IDENTITY_MODE: "enforce" as const,
@@ -122,9 +122,12 @@ export function loadConfig(path: string): ProxyConfig {
     anthropicBase: parsed?.providers?.zai?.anthropicBase ?? DEFAULTS.ZAI_ANTHROPIC_BASE,
     openaiBase: parsed?.providers?.zai?.openaiBase ?? DEFAULTS.ZAI_OPENAI_BASE,
   };
-  const bigmodel: ProviderEndpoints = {
-    anthropicBase: parsed?.providers?.bigmodel?.anthropicBase ?? DEFAULTS.BIGMODEL_ANTHROPIC_BASE,
-    openaiBase: parsed?.providers?.bigmodel?.openaiBase ?? DEFAULTS.BIGMODEL_OPENAI_BASE,
+  // zai_cn = the BigModel (open.bigmodel.cn) chain. Legacy fallback: an old
+  // config.yaml with a `providers.bigmodel` block still applies (its key is
+  // retired from the surface, 2026-11-22).
+  const zai_cn: ProviderEndpoints = {
+    anthropicBase: parsed?.providers?.zai_cn?.anthropicBase ?? parsed?.providers?.bigmodel?.anthropicBase ?? DEFAULTS.ZAI_CN_ANTHROPIC_BASE,
+    openaiBase: parsed?.providers?.zai_cn?.openaiBase ?? parsed?.providers?.bigmodel?.openaiBase ?? DEFAULTS.ZAI_CN_OPENAI_BASE,
   };
 
   // --- models ---
@@ -159,7 +162,7 @@ export function loadConfig(path: string): ProxyConfig {
     auth: { proxyApiKey, oauthCredentialsPath },
     provider,
     plan,
-    providers: { zai, bigmodel },
+    providers: { zai, zai_cn },
     defaultModel,
     models,
     identity,
@@ -363,10 +366,13 @@ function resolvePort(raw: unknown): number {
 }
 
 /** Resolve and validate provider string. */
-function resolveProvider(raw: unknown): "zai" | "bigmodel" {
+function resolveProvider(raw: unknown): "zai" | "zai_cn" {
   const v = typeof raw === "string" ? raw : DEFAULTS.PROVIDER;
-  if (v !== "zai" && v !== "bigmodel") {
-    throw new Error(`Invalid provider "${v}": must be "zai" or "bigmodel"`);
+  // Legacy fold: `bigmodel` was the pre-2026-11-22 config label for the CN
+  // family — old config.yaml files keep working (folded to zai_cn).
+  if (v === "bigmodel") return "zai_cn";
+  if (v !== "zai" && v !== "zai_cn") {
+    throw new Error(`Invalid provider "${v}": must be "zai" or "zai_cn"`);
   }
   return v;
 }

@@ -244,14 +244,16 @@ export interface ProxyConfig {
     host: string;
   };
   auth: AuthConfig;
-  /** Active upstream provider. */
-  provider: "zai" | "bigmodel";
+  /** Active upstream provider family (zai | zai_cn — 2026-11-22 the bigmodel
+   *  config label is retired; legacy stored credentials fold into zai_cn). */
+  provider: "zai" | "zai_cn";
   /** Which plan tier to use. "coding-plan" (default) uses direct upstream endpoints; "start-plan" routes through zcode.z.ai with JWT auth. */
   plan: "coding-plan" | "start-plan";
   /** Per-provider endpoint overrides. */
   providers: {
     zai: ProviderEndpoints;
-    bigmodel: ProviderEndpoints;
+    /** BigModel (open.bigmodel.cn) chain — the zai_cn family's endpoints. */
+    zai_cn: ProviderEndpoints;
   };
   /** Default model id used when client request omits `model`. */
   defaultModel: string;

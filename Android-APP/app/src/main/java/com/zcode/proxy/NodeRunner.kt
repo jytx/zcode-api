@@ -198,7 +198,7 @@ class NodeRunner(private val context: Context) {
               port: 8080
             auth:
               mode: oauth
-            provider: bigmodel
+            provider: zai_cn
             plan: coding-plan
         """.trimIndent()
     }

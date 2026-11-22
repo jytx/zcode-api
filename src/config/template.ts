@@ -3,11 +3,23 @@
  * the single-file binary (`bun build --compile`) without requiring a sidecar
  * `config.example.yaml` file at runtime.
  *
- * Source of truth: config.example.yaml at repo root. When editing the schema,
- * update BOTH this file AND config.example.yaml to keep them in sync.
+ * SYNC CONTRACT: this string is BYTE-IDENTICAL to config.example.yaml at repo
+ * root (the human-readable source of truth). The equality is enforced by
+ * template.test.ts — edit config.example.yaml first, then re-copy here; the
+ * test fails if the two drift. `ensureConfigFile` (edit.ts) spawns this
+ * content as a fresh config.yaml.
  */
 
-export const EXAMPLE_CONFIG_YAML: string = `server:
+export const EXAMPLE_CONFIG_YAML: string = `# ── Section index ─────────────────────────────────────────────────────────
+# server · auth · provider/plan · providers · models · identity ·
+# clientIdentity · responses · mcp (plugin tools + media generation) ·
+# media (speech REST) · async · claim · endpointRouting · clientSigning ·
+# highspeed · logging
+#
+# Every key is optional — the loader applies built-in defaults for anything
+# omitted; env vars override YAML values (see each section).
+
+server:
   port: 8080
   host: "0.0.0.0"
 
@@ -22,7 +34,7 @@ auth:
   # ~/.zcode-proxy/credentials.json:
   # oauthCredentialsPath: "~/.zcode-proxy/credentials.json"
 
-# Which upstream provider to use: "zai" or "bigmodel"
+# Which upstream provider family to use: "zai" or "zai_cn".
 provider: zai
 
 # Which plan tier to use:
@@ -42,7 +54,9 @@ providers:
   zai:
     anthropicBase: "https://api.z.ai/api/anthropic"
     openaiBase: "https://api.z.ai/api/coding/paas/v4"
-  bigmodel:
+  # zai_cn rides the BigModel (open.bigmodel.cn) chain — a zai_cn login
+  # surfaces the user's BigModel subscription.
+  zai_cn:
     anthropicBase: "https://open.bigmodel.cn/api/anthropic"
     openaiBase: "https://open.bigmodel.cn/api/coding/paas/v4"
 
@@ -86,6 +100,123 @@ clientIdentity:
   ttlSeconds: 900
   maxSessions: 1024
 
+# Responses API (/v1/responses) — Codex CLI / OpenAI Agents SDK endpoint.
+# Translates Responses requests through Chat Completions to the Anthropic-format
+# upstream (both plans post Anthropic upstream).
+# State (previous_response_id) is held in-memory (cleared on restart, 24h TTL).
+responses:
+  enabled: true
+  store:
+    maxEntries: 1000
+    ttlMs: 86400000
+
+# Official plugin-MCP aggregate (tianyancha / Wind / 同花顺 iFinD ...).
+# ONE /mcp endpoint exposes every plugin's tools, namespaced {plugin}__{tool}
+# (streamable HTTP JSON-RPC: initialize / ping / tools list & call). GET /mcp
+# returns a human-readable catalogue; DELETE /mcp closes the cached upstream
+# plugin sessions. Outbound calls hit Z.AI's official gateway with your
+# OAuth login injected — inbound callers authenticate with the same
+# proxyApiKey as the LLM routes.
+# Requires a coding-plan credential: the upstream gateway rejects
+# identity-only auth (JSON-RPC 3101), so start-plan requests fail with 400
+# \`mcp_plan_unsupported\`.
+# The server table ships with the build (scripts/regen-mcp-catalogue.ts).
+# The relay spends your paid data entitlements, so setting auth.proxyApiKey
+# is strongly recommended (CORS headers are only emitted when a key is set).
+# Legacy \`mcp.enabled\`/\`webSearch\`/\`webReader\`/\`zread\` keys are still parsed
+# but ignored (the GLM hosted-tool client they fed has been removed).
+# Env overrides: ZCODE_MCP_GATEWAY, ZCODE_MCP_GATEWAY_ORIGIN.
+mcp:
+  gateway:
+    enabled: true
+    # \`\${ZCODE_BASE_URL}\` substituted into plugin .mcp.json URLs.
+    # Production default per the desktop bundle (\`jee\`); the
+    # chatglm.site variant is the TEST env origin.
+    upstreamOrigin: https://zcode.z.ai
+
+# Media faces — the GENERATION capabilities (Seedream image gen / SeedDance
+# video / HappyHorse AI video / 3D: hyper3d | meshy | hi3d) are MCP tools on
+# the /mcp endpoint (2026-11-22: the former /api/v3/* REST faces were removed;
+# configure /mcp in any MCP client and call them as {plugin}__{tool} — same
+# ToolHub upstream, coding-plan only). The SPEECH pair below stays REST:
+#   POST /api/v3/auc/bigmodel/recognize/flash    (Seed-ASR, sync blocking only;
+#                                                 submit/query → 501)
+#   POST /api/v3/tts/create                      (Seed-Audio-shaped TTS)
+# ASR request body ≤45 MiB (the upstream nginx cap — chunk oversized audio
+# client-side, one flash request per piece); TTS body ≤1 MiB. Every media
+# call spends paid plan entitlements (billed to ToolHub/MaaS, NOT the LLM
+# plan quota — verified 2026-11-20), so auth.proxyApiKey is strongly
+# recommended.
+# Env overrides: ZCODE_MEDIA_GATEWAY, ZCODE_MEDIA_GATEWAY_ORIGIN.
+media:
+  enabled: true
+  upstreamOrigin: https://zcode.z.ai
+
+# Async (off-peak / "idle plan") bridge.
+# When enabled, exposes POST /async/v1/messages and /async/v1/chat/completions
+# that route through ZCode's off-peak ticket-queue backend — free compute when
+# the GLM cluster has idle capacity. The proxy holds the connection open with
+# SSE keepalives during queue wait, forwards the LLM stream once a ticket is
+# ready, and auto-retries on ticket-expired (up to maxRetries).
+#
+# IMPORTANT: off-peak needs the JWT captured by \`auth login\`. A credential
+# without a JWT makes the route return 400 \`async_credentials_unavailable\`.
+# Off-peak is a coding-plan feature: when \`plan: start-plan\`, the /async/*
+# routes return 400 \`async_plan_unsupported\` even when enabled: true.
+#
+# Env overrides: ZCODE_ASYNC_ENABLED, ZCODE_ASYNC_ORIGIN,
+# ZCODE_ASYNC_MAX_RETRIES, ZCODE_ASYNC_MAX_WAIT_MS.
+async:
+  enabled: false
+  origin: "https://zcode.z.ai"
+  pollIntervalMs: 5000
+  keepAliveIntervalMs: 3000
+  # Maximum total wait for ticket to become ready, in ms. 0 = unlimited.
+  maxWaitMs: 0
+  maxRetries: 3
+  settleTimeoutMs: 8000
+  controlTimeoutMs: 15000
+  # Optional model override; empty uses the request's \`model\`.
+  defaultModel: ""
+
+# Manual claim ("weekend plan") — mirrors the ZCode 3.10 desktop client's
+# manualClaimPlan feature. When enabled, the proxy periodically lists claimable
+# trial plans from both faces — {origin}/api/v1/zcode-plan/billing/preview
+# merged with marketing-banner plans ({origin}/api/v1/marketing/touch; deduped
+# by planId, preview wins) — and auto-claims the highest-priority one
+# ({origin}/api/v1/zcode-plan/billing/claim) using the OAuth JWT plus an
+# Aliyun captcha token when the campaign config requires one (same solver as
+# start-plan). Weekend campaigns are quota-limited first-come-first-served;
+# claimed plans activate at the campaign's \`starts_at\` and land as
+# Start-Plan quota.
+#
+# IMPORTANT: requires a logged-in credential (claim uses the JWT from
+# \`auth login\`), and identity.appVersion must be >= the campaign's minimum
+# client version or the server rejects with \`ineligible\` — an app_version
+# below the floor can also surface as a silently empty preview list
+# (measured floor 3.14.0 for the 2026-09 campaign; the built-in appVersion
+# tracks the mirrored desktop release and satisfies recent floors).
+#
+# Env overrides: ZCODE_CLAIM_ENABLED, ZCODE_CLAIM_AUTO, ZCODE_CLAIM_ORIGIN,
+# ZCODE_CLAIM_POLL_INTERVAL_MS.
+claim:
+  # On by default: the scheduler polls the merged plan list (billing preview +
+  # marketing banner) every 5 min and idles until a campaign goes live
+  # (404 preview = nothing to claim).
+  # \`false\` = CLI-only (\`zcode-proxy claim [list|now]\` still works).
+  enabled: true
+  # Auto-claim in the background while serving. \`false\` = CLI-only
+  # (\`zcode-proxy claim\` still works when \`enabled: true\`).
+  auto: true
+  origin: "https://zcode.z.ai"
+  # Preview poll cadence (5 min default).
+  pollIntervalMs: 300000
+  # Backoff after failed attempts (10 min default); quota_exhausted /
+  # already_claimed back off to the server-provided next window instead.
+  cooldownMs: 600000
+  # Optional: claim a specific plan_id. Empty = highest-priority preview.
+  planId: ""
+
 # Server-controlled upstream URL remapping (mirrors the ZCode client's
 # ProviderEndpointRoutingService). The proxy periodically fetches
 # {origin}/api/v1/agent/configs and rewrites matching upstream URLs per the
@@ -112,15 +243,21 @@ clientSigning:
 # ignites a background draw loop (POST {origin}/api/v1/highspeed/draw at ~1/s —
 # the measured token-bucket refill rate; server next_draw_at is ignored on a
 # miss); on a hit, requests inside the card window are rewritten to the card
-# model with the highspeed auth set (X-Highspeed-Card-ID) and stay unsigned,
-# exactly like the official client. The loop self-extinguishes 5 minutes after
-# the last eligible request; account unavailability (503/3404) is
-# negative-cached 10min, HTTP 429 backs off 5s. task_id reuses the local
-# client-session affinity inference. Env override: ZCODE_HIGHSPEED_ENABLED=false.
+# model with the highspeed auth set (X-Highspeed-Card-ID), rerouted to the
+# dedicated inference endpoint ({origin}/api/v1/highspeed/anthropic/v1/messages
+# — pinned by the official zcode-builtin provider rules, NOT the coding-plan
+# URL) and stay unsigned, exactly like the official client. The loop
+# self-extinguishes 5 minutes after the last eligible request; account
+# unavailability (503/3404) is negative-cached 10min, HTTP 429 backs off 5s.
+# Env override: ZCODE_HIGHSPEED_ENABLED=false.
 highspeed:
   enabled: true
   origin: "https://zcode.z.ai"
   models: ["glm-5.3", "glm-5.2", "glm-5.1"]
+
+# Update check (env-only, no YAML keys): ZCODE_UPDATE_CHECK=off disables the
+# automatic startup check; ZCODE_UPDATE_SKIP=v4.7.6,v4.7.7 mutes specific
+# tags. The check never blocks the process and never throws.
 
 logging:
   level: info

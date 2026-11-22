@@ -229,7 +229,9 @@ export class McpAggregateServer {
     // Local media tools dispatch BEFORE the upstream slot lookup — their
     // plugin keys (image-generation, happyhorse-video, …) are not catalogue
     // routeIds, and handler errors are MCP isError results, not RPC errors.
-    const local = findLocalTool(namespaced) ?? (this.localTools !== LOCAL_MCP_TOOLS ? this.localTools.find((d) => `${d.plugin}${NAMESPACE_SEPARATOR}${d.name}` === namespaced) : undefined);
+    // Lookup goes through THIS instance's registry (defaults to the frozen
+    // LOCAL_MCP_TOOLS; a test-injected registry can shadow freely).
+    const local = this.localTools.find((d) => `${d.plugin}${NAMESPACE_SEPARATOR}${d.name}` === namespaced) ?? (this.localTools === LOCAL_MCP_TOOLS ? findLocalTool(namespaced) : undefined);
     if (local) {
       const ctx: LocalToolContext = {
         origin: this.options.localToolsOrigin ?? this.origin,

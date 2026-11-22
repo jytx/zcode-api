@@ -74,17 +74,17 @@ describe("credential store", () => {
     expect(loaded!.provider).toBe("zai");
   });
 
-  it("roundtrips bigmodel credential (no secret)", async () => {
+  it("roundtrips a credential without secretKey (zai_cn family, no secret)", async () => {
     const cred: Credential = {
       apiKey: "bmKey789",
-      provider: "bigmodel",
+      provider: "zai_cn",
     };
     await saveCredential(cred);
     const loaded = await loadCredential();
     expect(loaded).not.toBeNull();
     expect(loaded!.apiKey).toBe("bmKey789");
     expect(loaded!.secret).toBeUndefined();
-    expect(loaded!.provider).toBe("bigmodel");
+    expect(loaded!.provider).toBe("zai_cn");
   });
 
   it("clearCredential removes stored credential", async () => {

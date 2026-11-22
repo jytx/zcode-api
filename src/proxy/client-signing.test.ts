@@ -438,7 +438,7 @@ describe("project-access JWT signing form (bigmodel OAuth)", () => {
     });
 
     const signed = await manager.sign(JWT_URL, BASE_PAIRS, {
-      credential: CRED, appVersion: "3.8.1", oauthAccessToken: OAUTH, provider: "bigmodel",
+      credential: CRED, appVersion: "3.8.1", oauthAccessToken: OAUTH, provider: "zai_cn",
     });
     expect(pair(signed, "X-Client-Sig")).toBeDefined();
     expect(mintUrls.some((u) => u.includes("/api_keys/testkey/access_tokens"))).toBeTrue();
@@ -456,7 +456,7 @@ describe("project-access JWT signing form (bigmodel OAuth)", () => {
         throw new Error(`unexpected fetch: ${url}`);
       }) as unknown as typeof fetch,
     });
-    const cred = { credential: CRED, appVersion: "3.8.1", oauthAccessToken: OAUTH, provider: "bigmodel" as const };
+    const cred = { credential: CRED, appVersion: "3.8.1", oauthAccessToken: OAUTH, provider: "zai_cn" as const };
     await manager.sign(JWT_URL, BASE_PAIRS, cred);
     await manager.sign(JWT_URL, BASE_PAIRS, cred);
     expect(mints).toBe(1); // negative cache: no re-mint inside the window

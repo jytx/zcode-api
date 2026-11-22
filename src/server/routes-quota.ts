@@ -113,10 +113,9 @@ function isSuccessfulEnvelope(e: { code?: number; success?: unknown }): boolean 
 
 /** Coding origin per stored credential's provider — `https://api.z.ai` / `https://open.bigmodel.cn`. */
 function codingOrigin(config: ProxyConfig, provider: Credential["provider"]): string | null {
-  // zai_cn folds into the BIGMODEL family (desktop
-  // `resolveStartPlanFamilyFromOAuthProvider`: zai_cn → "bigmodel") — the
-  // config providers map has no zai_cn key.
-  const family = provider === "zai_cn" ? "bigmodel" : provider;
+  // zai_cn IS the config label for the open.bigmodel.cn chain (2026-11-22 the
+  // bigmodel label is retired); legacy `bigmodel` credentials fold the same way.
+  const family = provider === "zai" ? "zai" : "zai_cn";
   try {
     return new URL(config.providers[family].openaiBase).origin;
   } catch {

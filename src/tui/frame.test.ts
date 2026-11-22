@@ -46,7 +46,7 @@ describe("buildFrame", () => {
   test("shows provider/plan button state and auth status", () => {
     const text = plainLines(baseState({ loggedIn: true, apiKeyPreview: "ab12cd34…" })).join("\n");
     expect(text).toContain(" zai ");
-    expect(text).toContain(" bigmodel ");
+    expect(text).toContain(" zai_cn ");
     expect(text).toContain(" coding-plan ");
     expect(text).toContain(" start-plan ");
     expect(text).toContain("logged in · ab12cd34…");
@@ -136,7 +136,7 @@ describe("buildFrame", () => {
     const { regions } = buildFrame(baseState());
     const actions = regions.map((r) => r.action);
     expect(actions).toContainEqual({ kind: "provider", value: "zai" });
-    expect(actions).toContainEqual({ kind: "provider", value: "bigmodel" });
+    expect(actions).toContainEqual({ kind: "provider", value: "zai_cn" });
     expect(actions).toContainEqual({ kind: "plan", value: "coding-plan" });
     expect(actions).toContainEqual({ kind: "plan", value: "start-plan" });
     expect(actions).toContainEqual({ kind: "key", key: "l" });
@@ -150,9 +150,9 @@ describe("buildFrame", () => {
     const providerRow = lines.findIndex((l) => l.includes(" zai "));
     expect(providerRow).toBeGreaterThan(0);
     const colOfZai = lines[providerRow]!.indexOf(" zai ");
-    const colOfBigmodel = lines[providerRow]!.indexOf(" bigmodel ");
+    const colOfBigmodel = lines[providerRow]!.indexOf(" zai_cn ");
     expect(findRegion(regions, providerRow, colOfZai + 2)).toEqual({ kind: "provider", value: "zai" });
-    expect(findRegion(regions, providerRow, colOfBigmodel + 2)).toEqual({ kind: "provider", value: "bigmodel" });
+    expect(findRegion(regions, providerRow, colOfBigmodel + 2)).toEqual({ kind: "provider", value: "zai_cn" });
     expect(findRegion(regions, providerRow, colOfBigmodel - 1)).toBeNull();
   });
 
@@ -188,9 +188,9 @@ describe("buildFrame", () => {
       const { text, regions } = buildFrame(baseState({ provider }));
       const lines = text.split("\n").map((l) => stripAnsi(l.replace(/\x1b\[K$/, "")));
       const row = lines.findIndex((l) => l.includes(" zai "));
-      expect(lines[row]!.indexOf(" zai ")).toBeLessThan(lines[row]!.indexOf(" bigmodel "));
-      const bigmodelCol = lines[row]!.indexOf(" bigmodel ");
-      expect(findRegion(regions, row, bigmodelCol + 2)).toEqual({ kind: "provider", value: "bigmodel" });
+      expect(lines[row]!.indexOf(" zai ")).toBeLessThan(lines[row]!.indexOf(" zai_cn "));
+      const bigmodelCol = lines[row]!.indexOf(" zai_cn ");
+      expect(findRegion(regions, row, bigmodelCol + 2)).toEqual({ kind: "provider", value: "zai_cn" });
       expect(findRegion(regions, row, lines[row]!.indexOf(" zai ") + 2)).toEqual({ kind: "provider", value: "zai" });
     }
     for (const plan of ["coding-plan", "start-plan"] as const) {

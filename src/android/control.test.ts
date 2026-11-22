@@ -33,7 +33,7 @@ async function post(body: unknown, state: ControlState, ctx?: HandlerContext) {
 
 describe("android control listener", () => {
   const baseState: ControlState = {
-    provider: "bigmodel",
+    provider: "zai_cn",
     plan: "coding-plan",
     proxyPort: 8080,
   };
@@ -48,7 +48,7 @@ describe("android control listener", () => {
     expect(result.body.ok).toBe(true);
     if (result.body.ok && "state" in result.body) {
       expect(result.body.state).toBe("running");
-      expect(result.body.provider).toBe("bigmodel");
+      expect(result.body.provider).toBe("zai_cn");
       expect(result.body.plan).toBe("coding-plan");
       expect(result.body.proxyPort).toBe(8080);
     }
@@ -113,7 +113,7 @@ describe("android control listener", () => {
 
   it("deliverOAuthCode is retired (bigmodel auth-code flow deprecated) — unknown_cmd", async () => {
     const req = makeStubRequest({
-      body: JSON.stringify({ cmd: "deliverOAuthCode", provider: "bigmodel", code: "x", state: "y" }),
+      body: JSON.stringify({ cmd: "deliverOAuthCode", provider: "zai_cn", code: "x", state: "y" }),
     });
     const result = await handleControlRequestForTest(req, baseState);
     expect(result.status).toBe(200);
@@ -126,7 +126,7 @@ describe("android control listener", () => {
 
 describe("android control listener — lifecycle commands", () => {
   const state: ControlState = {
-    provider: "bigmodel",
+    provider: "zai_cn",
     plan: "coding-plan",
     proxyPort: 0,
   };
@@ -178,7 +178,7 @@ describe("android control listener — lifecycle commands", () => {
 
 describe("android control listener — setConfig", () => {
   it("updates provider and plan via hook and syncs state", async () => {
-    const state: ControlState = { provider: "bigmodel", plan: "coding-plan", proxyPort: 0 };
+    const state: ControlState = { provider: "zai_cn", plan: "coding-plan", proxyPort: 0 };
     const ctx: HandlerContext = {
       logBuffer: new LogBuffer(),
       onSetConfig: async (changes) => ({
@@ -199,14 +199,14 @@ describe("android control listener — setConfig", () => {
 
   it("returns config_update_unavailable when hook missing", async () => {
     const state: ControlState = { provider: "zai", plan: "coding-plan", proxyPort: 0 };
-    const result = await post({ cmd: "setConfig", provider: "bigmodel" }, state);
+    const result = await post({ cmd: "setConfig", provider: "zai_cn" }, state);
     expect(result.body.ok).toBe(false);
     if (!result.body.ok) {
       expect(result.body.error).toBe("config_update_unavailable");
     }
   });
 
-  it("rejects provider zai_cn — a login flavor, never a config provider (official folding)", async () => {
+  it("rejects the retired bigmodel config label (2026-11-22 surface is zai|zai_cn)", async () => {
     const state: ControlState = { provider: "zai", plan: "coding-plan", proxyPort: 0 };
     const applied: Array<{ provider?: string }> = [];
     const ctx: HandlerContext = {
@@ -216,7 +216,7 @@ describe("android control listener — setConfig", () => {
         return { ok: true, provider: changes.provider ?? state.provider, plan: changes.plan ?? state.plan };
       },
     };
-    const result = await post({ cmd: "setConfig", provider: "zai_cn" }, state, ctx);
+    const result = await post({ cmd: "setConfig", provider: "bigmodel" }, state, ctx);
     expect(result.body.ok).toBe(false);
     if (!result.body.ok) {
       expect(result.body.error).toBe("invalid_provider");
@@ -233,7 +233,7 @@ describe("android control listener — getLogs", () => {
     logBuffer.push("[INFO] line one");
     logBuffer.push("[INFO] line two");
     const ctx: HandlerContext = { logBuffer };
-    const result = await post({ cmd: "getLogs" }, { provider: "bigmodel", plan: "coding-plan", proxyPort: 0 }, ctx);
+    const result = await post({ cmd: "getLogs" }, { provider: "zai_cn", plan: "coding-plan", proxyPort: 0 }, ctx);
     expect(result.body.ok).toBe(true);
     if (result.body.ok && "lines" in result.body) {
       expect(result.body.lines).toEqual(["[INFO] line one", "[INFO] line two"]);
@@ -247,7 +247,7 @@ describe("android control listener — getLogs", () => {
     logBuffer.push("b");
     logBuffer.push("c");
     const ctx: HandlerContext = { logBuffer };
-    const result = await post({ cmd: "getLogs", since: 1 }, { provider: "bigmodel", plan: "coding-plan", proxyPort: 0 }, ctx);
+    const result = await post({ cmd: "getLogs", since: 1 }, { provider: "zai_cn", plan: "coding-plan", proxyPort: 0 }, ctx);
     expect(result.body.ok).toBe(true);
     if (result.body.ok && "lines" in result.body) {
       expect(result.body.lines).toEqual(["b", "c"]);
@@ -258,7 +258,7 @@ describe("android control listener — getLogs", () => {
     const logBuffer = new LogBuffer();
     logBuffer.push("only");
     const ctx: HandlerContext = { logBuffer };
-    const result = await post({ cmd: "getLogs", since: 1 }, { provider: "bigmodel", plan: "coding-plan", proxyPort: 0 }, ctx);
+    const result = await post({ cmd: "getLogs", since: 1 }, { provider: "zai_cn", plan: "coding-plan", proxyPort: 0 }, ctx);
     expect(result.body.ok).toBe(true);
     if (result.body.ok && "lines" in result.body) {
       expect(result.body.lines).toEqual([]);
@@ -267,9 +267,9 @@ describe("android control listener — getLogs", () => {
 });
 
 describe("android control listener — quota", () => {
-  const state: ControlState = { provider: "bigmodel", plan: "coding-plan", proxyPort: 0 };
+  const state: ControlState = { provider: "zai_cn", plan: "coding-plan", proxyPort: 0 };
   const snapshot = {
-    provider: "bigmodel",
+    provider: "zai_cn",
     serverTime: 1759195200,
     jwt: null,
     balances: [],

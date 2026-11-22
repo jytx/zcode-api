@@ -150,7 +150,7 @@
           <label for="cfg-provider" class="muted">Provider</label>
           <select id="cfg-provider">
             <option value="zai">zai</option>
-            <option value="bigmodel">bigmodel</option>
+            <option value="zai_cn">zai_cn</option>
           </select>
           <label for="cfg-plan" class="muted">Plan</label>
           <select id="cfg-plan">

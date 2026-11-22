@@ -170,6 +170,19 @@ describe("video-generation__generate_video / get_video_result", () => {
     expect(calls.length).toBe(0);
   });
 
+  it("query surfaces auth/param errors immediately instead of burning the wait budget (review fix #2)", async () => {
+    let n = 0;
+    const { ctx, calls } = makeCtx(() => {
+      n += 1;
+      return new Response(JSON.stringify({ code: 1, msg: "jwt expired" }), { status: 401 });
+    });
+    const out = await callLocalTool(findLocalTool("video-generation__get_video_result")!, { task_id: "task-x" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(out.content[0].text).toContain("re-run");
+    // single failing query — no 12s-interval polling until the budget
+    expect(calls.length).toBe(1);
+  });
+
   it("get_video_result waits on the given task and maps succeeded", async () => {
     const { ctx, calls } = makeCtx(() => json({ status: "succeeded", output: { video_url: "https://v.test/b.mp4" } }));
     const out = await callLocalTool(findLocalTool("video-generation__get_video_result")!, { task_id: "task-9" }, ctx);

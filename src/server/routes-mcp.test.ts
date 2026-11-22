@@ -19,7 +19,7 @@ function makeConfig(overrides: Partial<ProxyConfig> = {}, mcpGateway: McpGateway
     plan: "coding-plan",
     providers: {
       zai: { anthropicBase: "https://api.z.ai/api/anthropic", openaiBase: "https://api.z.ai/api/coding/paas/v4" },
-      bigmodel: { anthropicBase: "https://open.bigmodel.cn/api/anthropic", openaiBase: "https://open.bigmodel.cn/api/coding/paas/v4" },
+      zai_cn: { anthropicBase: "https://open.bigmodel.cn/api/anthropic", openaiBase: "https://open.bigmodel.cn/api/coding/paas/v4" },
     },
     defaultModel: "glm-4.6",
     models: ["glm-4.6"],
@@ -244,5 +244,39 @@ describe("DELETE /mcp", () => {
     const resp = await h(new Request("http://localhost/mcp", { method: "DELETE" }));
     expect(resp.status).toBe(202);
     expect(stub.calls.some((c) => c.method === "DELETE")).toBe(true);
+  });
+});
+
+describe("/mcp POST body cap (review fix #3)", () => {
+  it("413s a request whose content-length declares over the cap, before auth/body buffering", async () => {
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: "sk-x.sec", provider: "zai", jwt: "jwt-1" });
+    const handlerFn = handler(makeConfig(), auth);
+    const resp = await handlerFn(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": String(109 * 1024 * 1024) },
+        body: "{}",
+      }),
+    );
+    expect(resp.status).toBe(413);
+    const body = (await resp.json()) as { error: { code: number; message: string } };
+    expect(body.error.code).toBe(-32700);
+    expect(body.error.message).toContain("108 MiB");
+  });
+
+  it("normal-size POST bodies pass the cap untouched", async () => {
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: "sk-x.sec", provider: "zai", jwt: "jwt-1" });
+    const handlerFn = handler(makeConfig(), auth);
+    const resp = await handlerFn(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": "2" },
+        body: "{}",
+      }),
+    );
+    // reaches the aggregate (initialize or invalid-request path) — not 413
+    expect(resp.status).not.toBe(413);
   });
 });

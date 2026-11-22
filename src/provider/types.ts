@@ -9,19 +9,25 @@
  * `createZaiCnProviderRuntimeConfig`): it walks the zai OAuth/token chain with
  * a China-region authorize host (zchat.z.ai, server-issued via cli/init) and
  * folds into the zai family everywhere downstream — the config surface
- * (`ProxyConfig.provider`) stays `"zai" | "bigmodel"`, mirroring the official
- * `families: ["zai","bigmodel"]` folding. See NOTEPAD「2026-11-14 增补」.
+ * (`ProxyConfig.provider`) is `"zai" | "zai_cn"` — 2026-11-22 (user decision):
+ * the `bigmodel` label is retired from the config/UI surface entirely (it
+ * survives only in WIRE namespaces: official entitlement keys
+ * `account:bigmodel-*`, the poll payload `data.bigmodel` bucket, and legacy
+ * stored credentials, which fold into the zai_cn family via
+ * `credentialFamily`). See NOTEPAD「2026-11-14 增补」 +「4.0.0 增补」§I.
  */
 export type ProviderId = "zai" | "zai_cn" | "bigmodel";
 
-/** Providers selectable in config.yaml / setConfig (config surface, zai_cn folded into bigmodel). */
-export type ConfigProviderId = Exclude<ProviderId, "zai_cn">;
+/** Providers selectable in config.yaml / setConfig (config surface: zai | zai_cn —
+ *  2026-11-22 the bigmodel label is retired; legacy bigmodel credentials fold
+ *  into zai_cn via `credentialFamily`). */
+export type ConfigProviderId = Exclude<ProviderId, "bigmodel">;
 
 /**
- * OAuth LOGIN methods. The bigmodel flavor is config/credential family only —
- * its OAuth login (bigmodel.cn auth-code + poll) is deprecated (superseded by
- * the zai_cn "Z.ai (CN)" zchat login, decision 2026-11-14); legacy bigmodel
- * credentials remain valid and resolve through the shared bigmodel chain.
+ * OAuth LOGIN methods (zai | zai_cn). The bigmodel OAuth login
+ * (bigmodel.cn auth-code + poll) is REMOVED (decision 2026-11-14, surface
+ * purge 2026-11-22); legacy bigmodel STORED credentials remain valid and
+ * resolve through the same open.bigmodel.cn chain as zai_cn.
  */
 export type LoginProviderId = Exclude<ProviderId, "bigmodel">;
 

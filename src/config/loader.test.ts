@@ -134,7 +134,9 @@ logging:
     expect(cfg.server.port).toBe(9090);
     expect(cfg.server.host).toBe("127.0.0.1");
     expect(cfg.auth.proxyApiKey).toBe("proxy-secret");
-    expect(cfg.provider).toBe("bigmodel");
+    // Legacy fold: `bigmodel` was the pre-2026-11-22 config label for the CN
+    // family — folded to zai_cn (2026-11-22 label retirement).
+    expect(cfg.provider).toBe("zai_cn");
     expect(cfg.defaultModel).toBe("glm-4.6");
     expect(cfg.models).toEqual(["glm-4.6", "glm-4.5"]);
     expect(cfg.logging.level).toBe("debug");
@@ -151,7 +153,7 @@ logging:
     expect(cfg.models).toEqual(["glm-5.3", "glm-5.3-flash"]);
     expect(cfg.logging.level).toBe("info");
     expect(cfg.providers.zai.anthropicBase).toBe("https://api.z.ai/api/anthropic");
-    expect(cfg.providers.bigmodel.openaiBase).toBe("https://open.bigmodel.cn/api/coding/paas/v4");
+    expect(cfg.providers.zai_cn.openaiBase).toBe("https://open.bigmodel.cn/api/coding/paas/v4");
     expect(cfg.clientIdentity).toEqual({ mode: "enforce", ttlSeconds: 900, maxSessions: 1024 });
     expect(cfg.responses).toEqual({ enabled: true, storeMaxEntries: 1000, storeTtlMs: 86400000 });
     expect(cfg.mcp).toEqual({ enabled: true, webSearch: true, webReader: false, zread: false, gateway: { enabled: true, upstreamOrigin: "https://zcode.z.ai" } });
@@ -480,7 +482,8 @@ provider: zai
     const cfg = loadConfig(path);
     expect(cfg.server.port).toBe(3000);
     expect(cfg.auth.proxyApiKey).toBe("fromenv-proxy");
-    expect(cfg.provider).toBe("bigmodel");
+    // Legacy fold: the retired bigmodel label maps to zai_cn.
+    expect(cfg.provider).toBe("zai_cn");
   });
 
   it("throws when port is out of range", () => {

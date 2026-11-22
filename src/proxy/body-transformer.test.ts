@@ -215,7 +215,7 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
       messages: [{ role: "user", content: "hi" }],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
 
     expect(parsed.system).toHaveLength(3);
@@ -245,7 +245,7 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
       messages: [{ role: "user", content: "hi" }],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
 
     expect(parsed.messages).toHaveLength(2);
@@ -275,7 +275,7 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
       ],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
     expect(parsed.tools[0]).toEqual({ name: "get_weather" });
     expect(parsed.tools[1]).toEqual({ name: "read_file" });
@@ -288,7 +288,7 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
       messages: [{ role: "user", content: "hi" }],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
     // Wiring-level assertions only: the byte-exact block shapes (cli_prefix,
     // stable-block tail, ephemeral breakpoints) are pinned at the
@@ -309,7 +309,7 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
         messages: [{ role: "user", content: "hi" }],
       });
 
-      const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "bigmodel" }));
+      const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "zai_cn" }));
       const parsed = JSON.parse(out as string);
 
       expect(parsed.system).toHaveLength(3);
@@ -326,7 +326,7 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
       messages: [{ role: "user", content: "hi" }],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
 
     expect(parsed.system).toHaveLength(3);
@@ -342,7 +342,7 @@ describe("transformRequestBody — start-plan system (OpenAI)", () => {
       messages: [{ role: "user", content: "hi" }],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "openai", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "openai", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
 
     expect(parsed.messages[0]).toEqual({
@@ -366,7 +366,7 @@ describe("transformRequestBody — start-plan system (OpenAI)", () => {
       messages: [{ role: "user", content: "hi" }],
     });
 
-    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "openai", startPlan: true, provider: "bigmodel" }));
+    const out = withEnvPromptVars(() => transformRequestBody(body, { format: "openai", startPlan: true, provider: "zai_cn" }));
     const parsed = JSON.parse(out as string);
 
     expect(parsed.messages[0].role).toBe("system");

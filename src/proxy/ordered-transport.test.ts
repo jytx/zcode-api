@@ -259,7 +259,7 @@ describe("proxyRequest — ordered transport + brotli SSE (ultra gateway regress
         plan: "coding-plan",
         providers: {
           zai: { anthropicBase: s.url, openaiBase: s.url },
-          bigmodel: { anthropicBase: s.url, openaiBase: s.url },
+          zai_cn: { anthropicBase: s.url, openaiBase: s.url },
         },
         defaultModel: "glm-4.6",
         models: ["glm-4.6"],
@@ -307,7 +307,7 @@ describe("proxyRequest — ordered transport abort (CL-04, handler level)", () =
         plan: "coding-plan",
         providers: {
           zai: { anthropicBase: s.url, openaiBase: s.url },
-          bigmodel: { anthropicBase: s.url, openaiBase: s.url },
+          zai_cn: { anthropicBase: s.url, openaiBase: s.url },
         },
         defaultModel: "glm-4.6",
         models: ["glm-4.6"],

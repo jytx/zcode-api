@@ -71,6 +71,13 @@ export interface LocalToolDef {
 const DEVIATION_NOTE =
   "\n\n【zcode-proxy 差异】本面无工作区文件系统：产物以临时 URL 返回（不落盘，output_path/output_dir 仅忽略）；素材不支持本地路径，请用 https:// 或 data: URL。";
 
+/** HappyHorse：官方契约 https-only，data: 直接拒（避免把 agent 引向必败输入，review 2026-11-22 minor） */
+const DEVIATION_NOTE_HTTPS_ONLY =
+  "\n\n【zcode-proxy 差异】本面无工作区文件系统：产物以临时 URL 返回（不落盘，output_path 仅忽略）；素材不支持本地路径且仅收 https:// URL（HappyHorse 不接受 data:）。";
+/** SeedDance：图片/音频收 data:，参考视频仅 https/asset */
+const DEVIATION_NOTE_VIDEO =
+  "\n\n【zcode-proxy 差异】本面无工作区文件系统：产物以临时 URL 返回（不落盘，output_path 仅忽略）；素材不支持本地路径——图片/音频可用 https:// 或 data: URL，参考视频仅 https:// 或 asset://。";
+
 const POLL_INTERVAL_MS = 12_000;
 const WAIT_BUDGET_MS = 280_000;
 const ANIMATION_LIST_LINES = 30;
@@ -139,7 +146,11 @@ async function waitLoop(
     try {
       step = await poll();
     } catch (err) {
-      if (err instanceof MediaUpstreamError && (err.kind === "not_found" || err.kind === "forbidden")) {
+      // Terminal kinds surface immediately: not_found/forbidden are task-level
+      // verdicts; auth (HTTP 401, expired credential) and param can never
+      // recover by polling — hiding them behind the budget would burn ~280s
+      // per call and never name the cause (review 2026-11-22 #2).
+      if (err instanceof MediaUpstreamError && (err.kind === "not_found" || err.kind === "forbidden" || err.kind === "auth" || err.kind === "param")) {
         return fail(`任务查询失败：${err.message}`);
       }
       // Transient query hiccup (network/2007/3702) — keep polling.
@@ -451,25 +462,25 @@ const SIDECAR = officialRaw as unknown as { generatedAt: string; source: string;
 interface HandlerRef {
   plugin: string;
   handler: (args: Record<string, unknown>, ctx: LocalToolContext) => Promise<LocalToolResult>;
-  /** Append the no-workspace deviation note to the official description. */
-  deviation?: boolean;
+  /** Append the no-workspace deviation note (per-tool material wording). */
+  deviation?: "default" | "https-only" | "video";
 }
 
 /** Handlers keyed by plugin — description/schema come from the sidecar verbatim. */
 const HANDLERS: Array<HandlerRef & { tool: string }> = [
-  { plugin: "image-generation", tool: "generate_image", handler: generateImageHandler, deviation: true },
-  { plugin: "video-generation", tool: "generate_video", handler: generateVideoHandler, deviation: true },
-  { plugin: "video-generation", tool: "get_video_result", handler: getVideoResultHandler, deviation: true },
-  { plugin: "happyhorse-video", tool: "generate_happyhorse_video", handler: generateHappyhorseHandler, deviation: true },
-  { plugin: "happyhorse-video", tool: "get_happyhorse_video_result", handler: getHappyhorseResultHandler, deviation: true },
-  { plugin: "hyper3d-3d", tool: "submit_hyper3d_task", handler: (a, c) => model3dSubmitHandler("hyper3d", a, c), deviation: true },
-  { plugin: "hyper3d-3d", tool: "get_hyper3d_task", handler: (a, c) => model3dGetHandler("hyper3d", a, c), deviation: true },
+  { plugin: "image-generation", tool: "generate_image", handler: generateImageHandler, deviation: "default" },
+  { plugin: "video-generation", tool: "generate_video", handler: generateVideoHandler, deviation: "video" },
+  { plugin: "video-generation", tool: "get_video_result", handler: getVideoResultHandler, deviation: "video" },
+  { plugin: "happyhorse-video", tool: "generate_happyhorse_video", handler: generateHappyhorseHandler, deviation: "https-only" },
+  { plugin: "happyhorse-video", tool: "get_happyhorse_video_result", handler: getHappyhorseResultHandler, deviation: "https-only" },
+  { plugin: "hyper3d-3d", tool: "submit_hyper3d_task", handler: (a, c) => model3dSubmitHandler("hyper3d", a, c), deviation: "default" },
+  { plugin: "hyper3d-3d", tool: "get_hyper3d_task", handler: (a, c) => model3dGetHandler("hyper3d", a, c), deviation: "default" },
   { plugin: "hyper3d-3d", tool: "list_hyper3d_animations", handler: hyper3dAnimationsHandler },
-  { plugin: "meshy-3d", tool: "submit_meshy_task", handler: (a, c) => model3dSubmitHandler("meshy", a, c), deviation: true },
-  { plugin: "meshy-3d", tool: "get_meshy_task", handler: (a, c) => model3dGetHandler("meshy", a, c), deviation: true },
+  { plugin: "meshy-3d", tool: "submit_meshy_task", handler: (a, c) => model3dSubmitHandler("meshy", a, c), deviation: "default" },
+  { plugin: "meshy-3d", tool: "get_meshy_task", handler: (a, c) => model3dGetHandler("meshy", a, c), deviation: "default" },
   { plugin: "meshy-3d", tool: "list_meshy_animations", handler: meshyAnimationsHandler },
-  { plugin: "hi3d-3d", tool: "submit_hi3d_task", handler: (a, c) => model3dSubmitHandler("hi3d", a, c), deviation: true },
-  { plugin: "hi3d-3d", tool: "get_hi3d_task", handler: (a, c) => model3dGetHandler("hi3d", a, c), deviation: true },
+  { plugin: "hi3d-3d", tool: "submit_hi3d_task", handler: (a, c) => model3dSubmitHandler("hi3d", a, c), deviation: "default" },
+  { plugin: "hi3d-3d", tool: "get_hi3d_task", handler: (a, c) => model3dGetHandler("hi3d", a, c), deviation: "default" },
 ];
 
 function buildLocalTools(): LocalToolDef[] {
@@ -483,7 +494,10 @@ function buildLocalTools(): LocalToolDef[] {
     out.push({
       plugin: ref.plugin,
       name: ref.tool,
-      description: ref.deviation ? `${tool.description}${DEVIATION_NOTE}` : tool.description,
+      description: ref.deviation === "https-only" ? `${tool.description}${DEVIATION_NOTE_HTTPS_ONLY}`
+        : ref.deviation === "video" ? `${tool.description}${DEVIATION_NOTE_VIDEO}`
+        : ref.deviation === "default" ? `${tool.description}${DEVIATION_NOTE}`
+        : tool.description,
       inputSchema: tool.inputSchema,
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       handler: ref.handler,
