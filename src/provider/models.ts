@@ -15,6 +15,27 @@ export const MODELS: ModelDef[] = [
   // entries are identical): contextWindow + maxOutputTokens per model.
   // Order is a deliberate deviation from the upstream catalog: current-gen
   // defaults lead the advertised list; consumers are id-keyed, not positional.
+  //
+  // GLM-5.4 (2026-11-23): specs from the official provider config
+  // zcode-builtin rev 47 (server-side hot update — the desktop app itself
+  // stayed at 4.0.0, so there is no newer bundled models_catalog to sync
+  // from). rev 47 added GLM-5.4 to all eight plan provider model lists
+  // (coding/start/off-peak × zai/bigmodel) and routes it onto the generic
+  // `glm[^/]*` model rule: 1M context / 128K max output / image+video+pdf
+  // input / reasoningLevel low·high·max — identical to glm-5.3, hence
+  // vision:true. NOT on the highspeed-card lists (rev 47 keeps those at
+  // GLM-5.3 + GLM-5.3-Flash), so it is not a highspeed draw family.
+  //
+  // Live verification (coding-plan credential, 2026-11-25): glm-5.4 answers
+  // 200 on the direct upstream and the effort channel works — output grew
+  // monotonically with reasoning_effort (low 58 → high 289 → max 411 tokens;
+  // omitted effort landed near max, matching defaultLevel "max"). Still
+  // RULE-SOURCED, not measured: contextWindow / maxOutputTokens (a
+  // max_tokens=200000 request was merely accepted, so that probe had no
+  // discriminating power for the 128K ceiling) and vision input.
+  // (_reverse/analysis/probe-glm54-coding.ts; the earlier 3006 "model not
+  // allowed" was the trial Start-Plan entitlement, not the model.)
+  { id: "glm-5.4", name: "GLM 5.4", contextWindow: 1_000_000, maxOutputTokens: 128_000, reasoning: true, vision: true },
   { id: "glm-5.3", name: "GLM 5.3", contextWindow: 1_000_000, maxOutputTokens: 128_000, reasoning: true },
   // start-plan gateway serves the -flash variant (used by claimed trial plans
   // like the weekend package); advertised so client-side discovery lists it.

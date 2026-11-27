@@ -82,6 +82,8 @@ describe("image-generation__generate_image", () => {
     expect(calls[0].url).toBe(invokeUrl("image_generate"));
     expect(JSON.parse(calls[0].body as string)).toEqual({ query: "a cat" });
     expect(calls[0].headers["idempotency-key"]).toMatch(/[0-9a-f-]{36}/);
+    // billing scenario: the official image-generation plugin's USAGE_SCENARIO
+    expect(calls[0].headers["x-usage-scenario"]).toBe("seedream-image");
   });
 
   it("uploads a data: reference first, then invokes with the presigned url (strict base64)", async () => {
@@ -123,6 +125,26 @@ describe("video-generation__generate_video / get_video_result", () => {
     expect(body).toEqual({ query: "x", duration: 8, ratio: "9:16", images: ["https://r.test/a.png"] });
     expect(calls[0].url).toBe(invokeUrl("video_generate"));
     expect(calls[calls.length - 1].url).toBe(queryUrl("video_generate"));
+  });
+
+  it("sends X-Usage-Scenario on every Seedance call — submit and query (official apiRequest contract)", async () => {
+    const { ctx, calls } = makeCtx((call) => (call.url.endsWith("/invoke") ? submitOk("task-us") : json({ status: "succeeded", output: { video_url: "https://v.test/us.mp4" } })));
+    const out = await callLocalTool(findLocalTool("video-generation__generate_video")!, { prompt: "x" }, ctx);
+    expect(out.isError).toBeUndefined();
+    expect(calls.map((c) => c.url)).toEqual([invokeUrl("video_generate"), queryUrl("video_generate")]);
+    // the plugin funnels every ToolHub call through one apiRequest that always sets it
+    for (const call of calls) expect(call.headers["x-usage-scenario"]).toBe("seedance-video");
+  });
+
+  it("Seedance passes data: images through UNUPLOADED — unlike image-generation (plugin resolveMaterial: `if (/^data:/) return item`)", async () => {
+    // Only LOCAL FILES are uploaded by the video plugin; base64 rides the wire as-is.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+    const dataUrl = `data:image/png;base64,${png}`;
+    const { ctx, calls } = makeCtx((call) => (call.url.endsWith("/invoke") ? submitOk("task-d") : json({ status: "running" })));
+    const out = await callLocalTool(findLocalTool("video-generation__generate_video")!, { prompt: "x", images: [dataUrl] }, ctx);
+    expect(out.isError).toBeUndefined();
+    expect(calls.some((c) => c.url.endsWith("/toolhub/files"))).toBe(false); // no upload round-trip
+    expect((JSON.parse(calls[0].body as string) as { images: string[] }).images).toEqual([dataUrl]);
   });
 
   it("honors request_id as the Idempotency-Key (replay contract)", async () => {

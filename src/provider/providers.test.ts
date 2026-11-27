@@ -28,12 +28,14 @@ describe("providers", () => {
 });
 
 describe("models", () => {
-  it("MODELS contains exactly the 11 pinned coding-plan models", () => {
-    expect(MODELS).toHaveLength(11);
+  it("MODELS contains exactly the 12 pinned coding-plan models", () => {
+    expect(MODELS).toHaveLength(12);
     const ids = MODELS.map((m) => m.id);
     // Current-gen defaults lead the advertised list; the rest newest→oldest.
+    // glm-5.4 (2026-11-23) leads as the newest flagship; it is NOT yet the
+    // advertised default (ADVERTISED_MODEL_IDS still 5.3 + 5.3-flash).
     expect(ids).toEqual([
-      "glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5",
+      "glm-5.4", "glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5",
       "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.6", "glm-4.6v",
       "glm-4.5-air",
     ]);
@@ -46,6 +48,20 @@ describe("models", () => {
       expect(m.contextWindow).toBeGreaterThan(0);
       expect(m.maxOutputTokens).toBeGreaterThan(0);
     }
+  });
+
+  it("glm-5.4 specs match the official zcode-builtin rev 47 generic glm rule", () => {
+    // rev 47 (2026-11-23 server-side hot update) routes GLM-5.4 onto
+    // `(?:.*/)?glm[^/]*`: 1M context / 128K max output / image+video+pdf /
+    // reasoningLevel low·high·max — the flagship tier, NOT the 200K/64K
+    // tier of the narrowed `glm-5` catch-all.
+    const byId = Object.fromEntries(MODELS.map((m) => [m.id, m]));
+    expect(byId["glm-5.4"]).toMatchObject({
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      reasoning: true,
+      vision: true,
+    });
   });
 
   it("contextWindow + maxOutputTokens match the 3.11.2 catalog per model", () => {

@@ -1,5 +1,20 @@
 /**
- * GLM-5.3 family reasoning-effort contract.
+ * GLM-5.3 / GLM-5.4 family reasoning-effort contract.
+ *
+ * 2026-11-23: GLM-5.4 joined the family — the official provider config
+ * (zcode-builtin rev 47, server-side hot update; the desktop bundle stayed at
+ * 4.0.0) routes GLM-5.4 onto the generic `glm[^/]*` model rule: 1M context /
+ * 128K max output / `reasoningLevel: ["low","high","max"]` / image+video+pdf
+ * input — the SAME three-level effort contract as GLM-5.3 (whose dedicated
+ * `glm-5\.3` rule carries identical values). The rev also narrowed the old
+ * catch-all `.*glm-5.*` (200K/64K, disabled|enabled) to bare `glm-5` + dated
+ * suffixes precisely so it no longer swallows 5.4.
+ *
+ * The 5.4 membership mirrors the official rule AND is live-verified for the
+ * effort channel (coding-plan, 2026-11-25): glm-5.4 output grew monotonically
+ * with reasoning_effort (low 58 → high 289 → max 411 tokens), so
+ * `output_config.effort` steers its thinking exactly as for 5.3. The exact
+ * budget→thinking ratio per level was measured for glm-5.3 only.
  *
  * The Anthropic upstream ignores the OpenAI `reasoning_effort` field entirely
  * for this model family — `output_config.effort` is the only channel that
@@ -10,7 +25,7 @@
  * setting both fields) plus live upstream verification.
  */
 
-/** The three legal `output_config.effort` levels for GLM-5.3 models (module-local; the type below is the public contract). */
+/** The three legal `output_config.effort` levels for GLM-5.3 / GLM-5.4 models (module-local; the type below is the public contract). */
 const GLM53_EFFORT_LEVELS = ["low", "high", "max"] as const;
 
 /** One of the three legal GLM-5.3 effort levels. */
@@ -41,14 +56,18 @@ export const GLM53_THINKING_BUDGETS: Readonly<Record<Glm53Effort, number>> = {
 export const GLM53_MIN_THINKING_BUDGET = 1_024;
 
 /**
- * Match the GLM-5.3 model family, including `glm-5.3-flash`, case-insensitively
- * (the upstream also accepts `GLM-5.3`). Deliberately excludes `glm-5`,
- * `glm-5.1`, and `glm-5.2` — the negative lookahead rejects a trailing digit
- * so `glm-5.30` (were it ever added) would not falsely match either.
+ * Match the GLM-5.3 / GLM-5.4 model family, including `glm-5.3-flash`,
+ * case-insensitively (the upstream also accepts `GLM-5.3`). Deliberately
+ * excludes `glm-5`, `glm-5.1`, and `glm-5.2` — the negative lookahead rejects
+ * a trailing digit so `glm-5.30` / `glm-5.40` (were either ever added) would
+ * not falsely match either. `glm-5.4` joined on 2026-11-23 (same three-level
+ * contract, see the module header).
  */
-const GLM53_MODEL_PATTERN = /glm-5\.3(?![0-9])/i;
+const GLM53_MODEL_PATTERN = /glm-5\.[34](?![0-9])/i;
 
-/** True when `model` belongs to the GLM-5.3 family (`glm-5.3`, `glm-5.3-flash`, ...). */
+/** True when `model` belongs to the GLM-5.3 / GLM-5.4 family (`glm-5.3`, `glm-5.3-flash`, `glm-5.4`, ...). The
+ *  exported name keeps its `Glm53` prefix: the contract is one family, the
+ *  5.4 models share it unchanged. */
 export function isGlm53Model(model: string | undefined): boolean {
   if (!model) return false;
   return GLM53_MODEL_PATTERN.test(model);

@@ -9,6 +9,7 @@ import { OFFICIAL_MCP_CATALOGUE } from "../mcp/catalogue.js";
 import { resolveReferenceImage } from "./seed-image.js";
 import {
   buildToolhubVideoBody,
+  normalizeGenerateAudio,
   validateVideoMaterialUrls,
 } from "./seed-video.js";
 import { buildTranscribeArguments, mapTranscriptToFlash, parseAsrFlashRequest } from "./seed-asr.js";
@@ -100,6 +101,25 @@ describe("seed-video — outgoing body + validation", () => {
     expect(body).toEqual({ query: "x", duration: 8, images: ["https://r.test/a.png"], videos: ["asset://v"] });
     const frames = buildToolhubVideoBody({ prompt: "x", firstFrame: "https://r.test/f.png", lastFrame: "https://r.test/l.png" });
     expect(frames).toEqual({ query: "x", first_frame: "https://r.test/f.png", last_frame: "https://r.test/l.png" });
+  });
+
+  it("buildToolhubVideoBody carries generateAudio as generate_audio, and omits it when unset", () => {
+    expect(buildToolhubVideoBody({ prompt: "x", generateAudio: true })).toEqual({ query: "x", generate_audio: true });
+    expect(buildToolhubVideoBody({ prompt: "x", generateAudio: false })).toEqual({ query: "x", generate_audio: false });
+    expect("generate_audio" in buildToolhubVideoBody({ prompt: "x" })).toBe(false);
+  });
+
+  it("normalizeGenerateAudio mirrors the plugin's generateAudioArg equivalence classes", () => {
+    // omitted-ish → undefined
+    for (const v of [undefined, null, "", "   "]) expect(normalizeGenerateAudio(v)).toBeUndefined();
+    // true-ish
+    for (const v of [true, "true", "True", " TRUE "]) expect(normalizeGenerateAudio(v)).toBe(true);
+    // false-ish
+    for (const v of [false, "false", "FALSE"]) expect(normalizeGenerateAudio(v)).toBe(false);
+    // everything else is a param error, never a silent coercion
+    for (const v of ["yes", "no", "1", "0", 1, 0, {}, []]) {
+      expect(() => normalizeGenerateAudio(v)).toThrow(/generate_audio/);
+    }
   });
 
   it("validateVideoMaterialUrls rejects data:/http: videos and oversized inline audio", () => {

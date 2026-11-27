@@ -36,7 +36,7 @@
 import officialRaw from "./official-media-tools.json" with { type: "json" };
 import { MediaUpstreamError } from "../media/shared.js";
 import { invokeImage, invokeToolLibrary, queryVideo, submitToolhubTask, type ToolHubDeps } from "../media/toolhub.js";
-import { buildToolhubVideoBody, validateVideoMaterialUrls, VIDEO_RATIOS } from "../media/seed-video.js";
+import { buildToolhubVideoBody, normalizeGenerateAudio, validateVideoMaterialUrls, VIDEO_RATIOS } from "../media/seed-video.js";
 import { resolveReferenceImage } from "../media/seed-image.js";
 import { createHappyhorseVideo, createModel3dTask, getHappyhorseVideo, getModel3dTask, MODEL3D_VENDORS, parseHappyhorseSubmit } from "../media/toolhub-tasks.js";
 
@@ -77,6 +77,22 @@ const DEVIATION_NOTE_HTTPS_ONLY =
 /** SeedDance：图片/音频收 data:，参考视频仅 https/asset */
 const DEVIATION_NOTE_VIDEO =
   "\n\n【zcode-proxy 差异】本面无工作区文件系统：产物以临时 URL 返回（不落盘，output_path 仅忽略）；素材不支持本地路径——图片/音频可用 https:// 或 data: URL，参考视频仅 https:// 或 asset://。";
+
+/**
+ * Billing-scenario header values (X-Usage-Scenario) for the Seed faces — the
+ * official plugins' `USAGE_SCENARIO` constants, verbatim: image-generation
+ * 0.1.2 → "seedream-image", video-generation 0.2.1/0.3.0 → "seedance-video".
+ * Both plugins send the header on EVERY ToolHub call (submit, query and the
+ * file upload go through one `apiRequest`). The 3D family carries its own
+ * values on MODEL3D_VENDORS; the video-agent-kit uses "video-kit".
+ *
+ * Correction (2026-11-25): an earlier note here claimed the Seed plugins do
+ * NOT send this header and that omitting it was the correct mirror. That was
+ * a grep false negative — the header has been in both plugins all along, and
+ * our Seed faces were the only ToolHub callers without it.
+ */
+const SEEDREAM_USAGE_SCENARIO = "seedream-image";
+const SEEDANCE_USAGE_SCENARIO = "seedance-video";
 
 const POLL_INTERVAL_MS = 12_000;
 const WAIT_BUDGET_MS = 280_000;
@@ -172,7 +188,7 @@ async function waitLoop(
 // ── image-generation ────────────────────────────────────────────────────────
 
 async function generateImageHandler(args: Record<string, unknown>, ctx: LocalToolContext): Promise<LocalToolResult> {
-  const deps: ToolHubDeps = { origin: ctx.origin, headers: ctx.headers, fetchImpl: ctx.fetchImpl, ...(ctx.retryDelayMs !== undefined ? { retryDelayMs: ctx.retryDelayMs } : {}) };
+  const deps: ToolHubDeps = { origin: ctx.origin, headers: ctx.headers, fetchImpl: ctx.fetchImpl, ...(ctx.retryDelayMs !== undefined ? { retryDelayMs: ctx.retryDelayMs } : {}), usageScenario: SEEDREAM_USAGE_SCENARIO };
   const prompt = str(args.prompt);
   if (!prompt) return fail("prompt 必须是非空字符串。");
   let image: string | undefined;
@@ -195,7 +211,7 @@ const VIDEO_MATERIAL_SCHEMES: Array<"https" | "data" | "asset"> = ["https", "dat
 const VIDEO_STRICT_SCHEMES: Array<"https" | "asset"> = ["https", "asset"];
 
 function videoPoller(ctx: LocalToolContext, taskId: string) {
-  const deps: ToolHubDeps = { origin: ctx.origin, headers: ctx.headers, fetchImpl: ctx.fetchImpl, ...(ctx.retryDelayMs !== undefined ? { retryDelayMs: ctx.retryDelayMs } : {}) };
+  const deps: ToolHubDeps = { origin: ctx.origin, headers: ctx.headers, fetchImpl: ctx.fetchImpl, ...(ctx.retryDelayMs !== undefined ? { retryDelayMs: ctx.retryDelayMs } : {}), usageScenario: SEEDANCE_USAGE_SCENARIO };
   return async () => {
     const snapshot = await queryVideo(deps, taskId);
     if (snapshot.status === "succeeded" && snapshot.videoUrl) {
@@ -217,7 +233,7 @@ function videoPoller(ctx: LocalToolContext, taskId: string) {
 }
 
 async function generateVideoHandler(args: Record<string, unknown>, ctx: LocalToolContext): Promise<LocalToolResult> {
-  const deps: ToolHubDeps = { origin: ctx.origin, headers: ctx.headers, fetchImpl: ctx.fetchImpl, ...(ctx.retryDelayMs !== undefined ? { retryDelayMs: ctx.retryDelayMs } : {}) };
+  const deps: ToolHubDeps = { origin: ctx.origin, headers: ctx.headers, fetchImpl: ctx.fetchImpl, ...(ctx.retryDelayMs !== undefined ? { retryDelayMs: ctx.retryDelayMs } : {}), usageScenario: SEEDANCE_USAGE_SCENARIO };
   const prompt = str(args.prompt);
   if (!prompt) return fail("prompt 必须是非空字符串。");
 
@@ -250,6 +266,13 @@ async function generateVideoHandler(args: Record<string, unknown>, ctx: LocalToo
   } catch (err) {
     return fail(errText(err));
   }
+  // 0.3.0 output-audio flag — same normalization as the plugin's generateAudioArg.
+  let generateAudio: boolean | undefined;
+  try {
+    generateAudio = normalizeGenerateAudio(args.generate_audio);
+  } catch (err) {
+    return fail(errText(err));
+  }
 
   const req = {
     prompt,
@@ -260,6 +283,7 @@ async function generateVideoHandler(args: Record<string, unknown>, ctx: LocalToo
     ...(lastFrame ? { lastFrame } : {}),
     ...(duration !== undefined ? { duration } : {}),
     ...(ratio ? { ratio } : {}),
+    ...(generateAudio !== undefined ? { generateAudio } : {}),
   };
   const materialCheck = validateVideoMaterialUrls(req);
   if (!materialCheck.ok) return fail(materialCheck.message);

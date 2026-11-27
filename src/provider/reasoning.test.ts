@@ -25,6 +25,20 @@ describe("isGlm53Model", () => {
     expect(isGlm53Model("glm-5.3-flash")).toBe(true);
   });
 
+  it("matches glm-5.4 (joined the family 2026-11-23 — same three-level contract)", () => {
+    expect(isGlm53Model("glm-5.4")).toBe(true);
+  });
+
+  it("matches GLM-5.4 case-insensitively and any future -suffix variant", () => {
+    expect(isGlm53Model("GLM-5.4")).toBe(true);
+    expect(isGlm53Model("glm-5.4-flash")).toBe(true);
+  });
+
+  it("does not match glm-5.40 (negative lookahead keeps guarding the trailing digit)", () => {
+    expect(isGlm53Model("glm-5.40")).toBe(false);
+    expect(isGlm53Model("glm-5.41-flash")).toBe(false);
+  });
+
   it("does not match glm-5.2", () => {
     expect(isGlm53Model("glm-5.2")).toBe(false);
   });

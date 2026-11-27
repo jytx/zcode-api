@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-22",
-  "source": "official plugin stdio servers via live tools/list probe (_reverse/analysis/dump-plugin-tools.mjs): image-generation@0.1.2, video-generation@0.2.1, happyhorse-video@0.1.1, hyper3d-3d@0.1.0, meshy-3d@0.1.0, hi3d-3d@0.1.0 — descriptions/schemas verbatim; regenerate and re-paste when plugins update",
+  "generatedAt": "2026-11-25",
+  "source": "official plugin stdio servers via live tools/list probe (_reverse/analysis/regen-media-sidecar.mjs): image-generation@0.1.2, video-generation@0.3.0, happyhorse-video@0.1.1, hyper3d-3d@0.1.0, meshy-3d@0.1.0, hi3d-3d@0.1.0 — descriptions/schemas verbatim; regenerate and re-paste when plugins update",
   "plugins": {
     "image-generation": {
       "tools": [
@@ -40,7 +40,7 @@
       "tools": [
         {
           "name": "generate_video",
-          "description": "根据文字描述生成一段短视频；可带参考图 / 参考视频 / 参考音频，或指定首帧（和尾帧）。生成通常需要几分钟。每次调用都会提交一个新任务并消耗额度：本工具等不完时会返回 task_id，请改用 get_video_result 继续等待，不要重复调用本工具。",
+          "description": "用 Seedance 模型根据文字描述生成一段短视频；可带参考图 / 参考视频 / 参考音频，或指定首帧（和尾帧）。调用前先用 AskUserQuestion 问用户是否需要声音（单选：需要 / 不需要），用户原话已说清时不用问。生成通常需要几分钟。每次调用都会提交一个新任务并消耗额度：本工具等不完时会返回 task_id，请改用 get_video_result 继续等待，不要重复调用本工具。",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -58,6 +58,13 @@
               "ratio": {
                 "type": "string",
                 "description": "可选，画幅（宽高比）：16:9 / 4:3 / 1:1 / 3:4 / 9:16 / 21:9 / adaptive。不传默认 16:9；adaptive 由模型按内容自动适配。用了 first_frame 时画幅跟随首帧图，只能不传或传 adaptive。"
+              },
+              "generate_audio": {
+                "type": [
+                  "boolean",
+                  "string"
+                ],
+                "description": "可选，输出视频是否带声音（人声、音效、背景音乐）：true 有声，false 无声。调用前先用 AskUserQuestion 问用户是否需要声音（单选，选项「需要」「不需要」），选「需要」传 true、选「不需要」传 false；用户在请求里已经说清要不要声音时不用再问，直接按原话传。用户跳过不答时不传，由服务端决定（默认有声）。与 audios 无关：audios 是输入的参考音频，不决定输出有没有声音。"
               },
               "images": {
                 "type": "array",
@@ -239,7 +246,7 @@
       "tools": [
         {
           "name": "submit_hyper3d_task",
-          "description": "ZCode 官方 Hyper3D 3D 建模（按 Coding Plan 计费，无需 Hyper3D 账号；不是第三方 hyper3d-rodin 插件）：提交一个任务并等待结果，完成后把产物下载到工作区。任务成功才扣费（每次 0.5 credit，失败不扣费），每次调用都会提交一个新任务：本工具等不完时会返回 task_id，请改用 get_hyper3d_task 继续等待，不要重复调用本工具",
+          "description": "ZCode 官方 Hyper3D 3D 建模（按 Coding Plan 计费，无需 Hyper3D 账号；不是第三方 hyper3d-rodin 插件）：提交一个任务并等待结果，完成后把产物下载到工作区。任务成功才扣费（每次 0.5 credit，失败不扣费），每次调用都会提交一个新任务：本工具等不完时会返回 task_id，请改用 get_hyper3d_task 继续等待，不要重复调用本工具。\naction：generate（用文字和/或 1–5 张图片生成 3D 模型）、polygen（智能低模：直接生成 200–10000 面的低多边形模型，适合游戏资产，默认 obj）、texture（给一个 https 模型地址重新贴图，必须给参考图 image）、rig（绑骨并套预设动画）。\npolygen 的来源至少给一个：本插件 generate 任务的 task_id、模型 model_url（https）、参考图 images、文字 prompt；task_id 和 model_url 只能二选一。task_id / images / prompt 默认 material=None 只出几何，要贴图请设 material；model_url 默认迁移原贴图（transfer_texture=false 只出几何），不接受 prompt、material、uhd_texture。\nrig 的模型来源是 task_id 或 model_url（https）二选一。rig 和 polygen 的 task_id 都只接受本插件 generate 任务（gen: 开头）；低模（poly:）、贴图（tex:）或绑骨（rig:）后的模型不能再按 task_id 绑骨或做 polygen，需要先下载、放到公网 https 地址并以 model_url 传入。用 task_id 串联时前一步任务必须已经成功。动画 id 用 list_hyper3d_animations 查询。\n只有文字描述时，推荐先用 Seedream（image-generation 插件的 generate_image）生成一张参考图（单个物体、纯色背景、完整视角），再用图片生成 3D，效果通常更好。调用 Seedream 前先告诉用户这会多一步单独计费的生图；用户不同意、明确要求只用文字生成，或 Seedream 不可用时，不调用 Seedream，直接用 prompt 调用 generate（低模用 polygen 的 prompt）。生图失败时如实报告，不要自己画图代替。\n本地参考图（png / jpg / jpeg / webp，不超过 10 MiB）会自动上传；本地 3D 模型文件无法上传，请给 https 地址或用 task_id 串联。task_id 很长（600+ 字符），原样传入，不要截断或改写。",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -471,7 +478,7 @@
       "tools": [
         {
           "name": "submit_meshy_task",
-          "description": "ZCode 官方 Meshy 3D 建模（按 Coding Plan 计费，无需 Meshy 账号）：提交一个任务并等待结果，完成后把模型下载到工作区。任务成功才扣费（失败不扣费），每次调用都会提交一个新任务：本工具等不完时会返回 task_id，请改用 get_meshy_task 继续等待，不要重复调用本工具。\naction：generate（文字 → 白模；1 张图 → 图生 3D；2–4 ",
+          "description": "ZCode 官方 Meshy 3D 建模（按 Coding Plan 计费，无需 Meshy 账号）：提交一个任务并等待结果，完成后把模型下载到工作区。任务成功才扣费（失败不扣费），每次调用都会提交一个新任务：本工具等不完时会返回 task_id，请改用 get_meshy_task 继续等待，不要重复调用本工具。\naction：generate（文字 → 白模；1 张图 → 图生 3D；2–4 张图 → 多图生 3D，第一张为正面）、refine（给文字生成的白模上贴图，只接受 preview: 开头的 task_id）、retexture（换贴图）、remesh（减面 / 重拓扑）、convert（转格式）、rig（人形绑骨）、animate（套预设动画，只接受 rig: 开头的 task_id）。\nretexture / remesh / convert / rig 的模型来源是 task_id（preview / refine / image / multi / retexture / remesh 类型）或 model_url（https）二选一。绑骨前必须先 remesh：生成的模型约 140 万三角面，超过绑骨上限 38 万，直接 rig 会被拒绝。推荐链路：generate →（文字生成再 refine）→ remesh（target_polycount ≤ 300000）→ 用 remesh 的 task_id rig → animate。用 task_id 串联时前一步任务必须已经成功。动画 id 用 list_meshy_animations 查询。\n只有文字描述时，推荐先用 Seedream（image-generation 插件的 generate_image）生成一张参考图（单个物体、纯色背景、完整视角），再用图片生成 3D，效果通常更好。调用 Seedream 前先告诉用户这会多一步单独计费的生图；用户不同意、明确要求只用文字生成，或 Seedream 不可用时，不调用 Seedream，直接用 prompt 调用 generate。生图失败时如实报告，不要自己画图代替。\n本地参考图（png / jpg / jpeg / webp，不超过 20 MiB）会自动上传；本地 3D 模型文件无法上传，请给 https 地址或用 task_id 串联。task_id 原样传入，不要截断或改写。",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -685,7 +692,7 @@
       "tools": [
         {
           "name": "submit_hi3d_task",
-          "description": "ZCode 官方 Hi3D 3D 建模（按 Coding Plan 计费，无需 Hi3D 账号）：提交一个任务并等待结果，完成后把模型和封面图下载到工作区。任务成功才扣费（失败不扣费），每次调用都会提交一个新任务：本工具等不完时会返回 task_id，请改用 get_hi3d_task 继续等待，不要重复调用本工具。\naction：generate（用 1–4 张参考图生成 3D 模型；1 张为单",
+          "description": "ZCode 官方 Hi3D 3D 建模（按 Coding Plan 计费，无需 Hi3D 账号）：提交一个任务并等待结果，完成后把模型和封面图下载到工作区。任务成功才扣费（失败不扣费），每次调用都会提交一个新任务：本工具等不完时会返回 task_id，请改用 get_hi3d_task 继续等待，不要重复调用本工具。\naction：generate（用 1–4 张参考图生成 3D 模型；1 张为单图，2–4 张为多视角，必须包含正面）、texture（给白模贴图，必须给参考图 image）、split（把模型拆成部件）。\ntexture / split 的模型来源是 task_id 或 model_url（https）二选一：texture 的 task_id 只接受 gen: 开头、model_url 只支持 .glb；split 的 task_id 接受 gen: / tex: 开头、model_url 支持 .glb / .obj / .stl。用 task_id 串联时前一步任务必须已经成功。\nHi3D 只接受图片：只有文字描述时，需要先用 Seedream（image-generation 插件的 generate_image）生成一张参考图（单个物体、纯色背景、完整视角）再提交。调用 Seedream 前先告诉用户参考图要用 Seedream 生成、单独计费；用户不同意或 Seedream 不可用时，不调用 Seedream，请用户提供参考图（Hi3D 不能只用文字生成）。生图失败时如实报告，不要自己画图代替。\n本地参考图（png / jpg / jpeg / webp，不超过 10 MiB）会自动上传；本地 3D 模型文件无法上传，请给 https 地址或用 task_id 串联。task_id 原样传入，不要截断或改写。",
           "inputSchema": {
             "type": "object",
             "properties": {

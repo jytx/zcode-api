@@ -6,10 +6,15 @@
  * 2026-11-22 ("API 路线换回 MCP 路线") — the Ark content[] parse layer and
  * the Ark response mapping went with it; what survives is the body builder
  * and material validation (the plugin tool args map 1:1 onto the ToolHub
- * material params — video-generation/0.2.1/mcp/server.mjs `buildSubmitBody`:
+ * material params — video-generation/0.3.0/mcp/server.mjs `buildSubmitBody`:
  *   images ≤9 https/data:, videos ≤3 https/asset:// ONLY (ToolHub rejects
  *   data: videos), audios ≤3 https/asset/data: ≤2 MiB inline, first/last
- *   frame the exclusive pair).
+ *   frame the exclusive pair, generate_audio → body.generate_audio).
+ *
+ * 0.2.1 → 0.3.0 (2026-11-25): the only wire-facing change is the new
+ * `generate_audio` arg (whether the OUTPUT video has sound — independent of
+ * `audios`, which are input reference clips). Everything else (endpoints,
+ * retry ladder, duration 4–30, ratios, material caps) is byte-identical.
  *
  * Deliberate deviations vs the plugin's own submit body: none — the MCP
  * handler maps the plugin tool args 1:1 (prompt→query, first_frame→first_frame…);
@@ -18,6 +23,7 @@
  *
  * @see src/media/toolhub.ts（submitVideo / queryVideo 语义来源）
  */
+import { MediaUpstreamError } from "./shared.js";
 
 export interface SeedVideoCreateRequest {
   model?: string;
@@ -29,17 +35,37 @@ export interface SeedVideoCreateRequest {
   lastFrame?: string;
   duration?: number;
   ratio?: string;
+  /** 0.3.0: output audio flag — `true`/`false`; undefined = omitted (the
+   *  service decides; it defaults to sound). */
+  generateAudio?: boolean;
 }
 
 export const VIDEO_RATIOS = new Set(["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"]);
 const MAX_INLINE_AUDIO_BYTES = 2 * 1024 * 1024;
 
 
+/**
+ * Normalize the `generate_audio` tool arg exactly like the plugin's
+ * `generateAudioArg` (0.3.0): boolean passes through; the strings "true"/
+ * "false" (case-insensitive, trimmed) coerce; undefined/null/"" mean omitted;
+ * anything else is a caller error (the plugin throws ToolError there).
+ */
+export function normalizeGenerateAudio(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "boolean") return value;
+  const text = typeof value === "string" ? value.trim().toLowerCase() : undefined;
+  if (text === "") return undefined;
+  if (text === "true") return true;
+  if (text === "false") return false;
+  throw new MediaUpstreamError("generate_audio 只能是 true 或 false，不确定时请不传。", "param");
+}
+
 /** Build the ToolHub submit body (mirrors buildSubmitBody field-for-field). */
 export function buildToolhubVideoBody(req: SeedVideoCreateRequest): Record<string, unknown> {
   const body: Record<string, unknown> = { query: req.prompt };
   if (req.duration !== undefined) body.duration = req.duration;
   if (req.ratio !== undefined) body.ratio = req.ratio;
+  if (req.generateAudio !== undefined) body.generate_audio = req.generateAudio;
   if (req.firstFrame) {
     body.first_frame = req.firstFrame;
     if (req.lastFrame) body.last_frame = req.lastFrame;

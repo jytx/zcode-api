@@ -582,6 +582,30 @@ describe("translateRequestOpenAIToAnthropic", () => {
       expect(result.thinking).toEqual({ type: "enabled", budget_tokens: 16_000 });
     });
 
+    it("glm-5.4: reasoning_effort:'high' sets BOTH fields — the 5.4 family shares the 5.3 contract (rev 47)", () => {
+      const req: OpenAIChatRequest = { model: "glm-5.4", messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" };
+      const out = translateRequestOpenAIToAnthropic(req);
+      expect(out.thinking).toEqual({ type: "enabled", budget_tokens: 16_000 });
+      expect(out.output_config).toEqual({ effort: "high" });
+    });
+
+    it("glm-5.4: absent reasoning_effort defaults to 'max' + the 128K catalog max_tokens (not the generic fallback)", () => {
+      // Before the catalog + pattern fix glm-5.4 was unknown: no thinking
+      // field at all AND max_tokens fell to the generic default.
+      const req: OpenAIChatRequest = { model: "glm-5.4", messages: [{ role: "user", content: "hi" }] };
+      const out = translateRequestOpenAIToAnthropic(req);
+      expect(out.thinking).toEqual({ type: "enabled", budget_tokens: 32_000 });
+      expect(out.output_config).toEqual({ effort: "max" });
+      expect(out.max_tokens).toBe(128_000);
+    });
+
+    it("glm-5.4: client max_tokens rides ON TOP of the thinking budget (SDK additive rule)", () => {
+      const req: OpenAIChatRequest = { model: "glm-5.4", messages: [{ role: "user", content: "hi" }], max_tokens: 8000, reasoning_effort: "low" };
+      const out = translateRequestOpenAIToAnthropic(req);
+      expect(out.thinking).toEqual({ type: "enabled", budget_tokens: 8_000 });
+      expect(out.max_tokens).toBe(16_000);
+    });
+
     it("glm-5.3-flash: reasoning_effort:'high' also sets BOTH fields (previously got no thinking field at all)", () => {
       const req: OpenAIChatRequest = {
         model: "glm-5.3-flash",
